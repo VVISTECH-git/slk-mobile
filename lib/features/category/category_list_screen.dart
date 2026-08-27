@@ -441,14 +441,36 @@ class _CategoryCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Jump straight to this category's photo guide (pinned right).
-                  InkWell(
-                    borderRadius: BorderRadius.circular(20),
-                    onTap: () => context.push('/category/${row.id}/photos', extra: {'name': row.name}),
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(Icons.photo_camera_outlined, size: 20, color: context.p.primary),
-                    ),
+                  // Photos menu (pinned right): actual per-colour product photos,
+                  // or the photo-guide sample checklist.
+                  PopupMenuButton<String>(
+                    icon: Icon(Icons.photo_camera_outlined, size: 20, color: context.p.primary),
+                    tooltip: 'Photos',
+                    onSelected: (v) {
+                      if (v == 'product') {
+                        context.push('/category/${row.id}/product-photos', extra: {'name': row.name});
+                      } else {
+                        context.push('/category/${row.id}/photos', extra: {'name': row.name});
+                      }
+                    },
+                    itemBuilder: (menuCtx) => [
+                      PopupMenuItem(
+                        value: 'product',
+                        child: Row(children: [
+                          Icon(Icons.checkroom_outlined, size: 20, color: menuCtx.p.primary),
+                          const SizedBox(width: 12),
+                          const Text('Product photos'),
+                        ]),
+                      ),
+                      PopupMenuItem(
+                        value: 'guide',
+                        child: Row(children: [
+                          Icon(Icons.photo_library_outlined, size: 20, color: menuCtx.p.textSecondary),
+                          const SizedBox(width: 12),
+                          const Text('Photo guide (samples)'),
+                        ]),
+                      ),
+                    ],
                   ),
                 ],
               ),

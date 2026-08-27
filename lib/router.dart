@@ -11,6 +11,7 @@ import 'features/pos/pos_screen.dart';
 import 'features/products/products_screen.dart';
 import 'features/products/product_detail_screen.dart';
 import 'features/products/product_form_screen.dart';
+import 'features/products/variant_photos_screen.dart';
 import 'features/category/category_list_screen.dart';
 import 'features/category/category_form_screen.dart';
 import 'features/stock/stock_screen.dart';
@@ -104,6 +105,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, state) => PhotoGuideScreen(
           categoryId: state.pathParameters['id']!,
           categoryName: (state.extra as Map?)?['name'] as String? ?? 'Design',
+        ),
+      ),
+      GoRoute(
+        path: '/category/:id/product-photos',
+        builder: (_, state) => VariantPhotosScreen(
+          categoryId: state.pathParameters['id']!,
+          designName: (state.extra as Map?)?['name'] as String? ?? 'Design',
         ),
       ),
 
