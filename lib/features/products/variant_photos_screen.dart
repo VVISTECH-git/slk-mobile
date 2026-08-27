@@ -8,6 +8,7 @@ import '../../core/api_client.dart';
 import '../../core/providers.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/async_view.dart';
+import '../../widgets/photo_viewer.dart';
 
 /// Capture PRODUCT photos per COLOUR variant and (optionally) per photo-guide
 /// slot (Pallu / Body / Border …). Saves to the shared DB via the colour-photos
@@ -33,6 +34,9 @@ class _VariantPhotosScreenState extends ConsumerState<VariantPhotosScreen> {
   List<Map<String, dynamic>> _slots = [];
   // colorKey -> list of { id, data, slotId, slotLabel, ... }
   final Map<String, List<Map<String, dynamic>>> _photos = {};
+  // colorKey -> AI-generated images { id, data, prompt (pose name), ... }
+  final Map<String, List<Map<String, dynamic>>> _generated = {};
+  String? _genColour; // colorKey currently generating
 
   String _ck(String c) => c.trim().toLowerCase();
   ApiClient get _api => ref.read(apiClientProvider);
@@ -58,8 +62,10 @@ class _VariantPhotosScreenState extends ConsumerState<VariantPhotosScreen> {
       final slots = ((slotsData as List?) ?? []).map((e) => (e as Map).cast<String, dynamic>()).toList();
 
       _photos.clear();
+      _generated.clear();
       for (final c in colours) {
         _photos[_ck(c)] = await _fetchColour(c);
+        _generated[_ck(c)] = await _fetchColour(c, kind: 'generated');
       }
       if (!mounted) return;
       setState(() {
@@ -76,15 +82,39 @@ class _VariantPhotosScreenState extends ConsumerState<VariantPhotosScreen> {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _fetchColour(String colour) async {
-    final ph = await _api.get('/categories/${widget.categoryId}/colour-photos', query: {'colour': colour});
+  Future<List<Map<String, dynamic>>> _fetchColour(String colour, {String kind = 'product'}) async {
+    final ph = await _api.get('/categories/${widget.categoryId}/colour-photos',
+        query: {'colour': colour, 'kind': kind});
     return ((ph as List?) ?? []).map((e) => (e as Map).cast<String, dynamic>()).toList();
   }
 
   Future<void> _reloadColour(String colour) async {
-    final list = await _fetchColour(colour);
+    final p = await _fetchColour(colour);
+    final g = await _fetchColour(colour, kind: 'generated');
     if (!mounted) return;
-    setState(() => _photos[_ck(colour)] = list);
+    setState(() {
+      _photos[_ck(colour)] = p;
+      _generated[_ck(colour)] = g;
+    });
+  }
+
+  Future<void> _generate(String colour) async {
+    setState(() {
+      _genColour = _ck(colour);
+      _error = null;
+    });
+    try {
+      await _api.post('/categories/${widget.categoryId}/generate-images',
+          body: {'colour': colour}, receiveTimeout: const Duration(seconds: 180));
+      final g = await _fetchColour(colour, kind: 'generated');
+      if (!mounted) return;
+      setState(() => _generated[_ck(colour)] = g);
+      if (mounted) showOk(context, 'Model images generated.');
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _genColour = null);
+    }
   }
 
   void _captureSheet(String colour, {String? slotId}) {
@@ -224,6 +254,8 @@ class _VariantPhotosScreenState extends ConsumerState<VariantPhotosScreen> {
 
   Widget _colourCard(BuildContext context, String colour) {
     final photos = _photos[_ck(colour)] ?? const [];
+    final generated = _generated[_ck(colour)] ?? const [];
+    final generating = _genColour == _ck(colour);
     final bySlot = <String, Map<String, dynamic>>{};
     for (final p in photos) {
       final sid = p['slotId'] as String?;
@@ -238,12 +270,28 @@ class _VariantPhotosScreenState extends ConsumerState<VariantPhotosScreen> {
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Icon(Icons.palette_outlined, size: 16, color: context.p.primary),
-            const SizedBox(width: 6),
-            Text(colour, style: const TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(width: 8),
-            Text('${photos.length} photo${photos.length == 1 ? '' : 's'}',
-                style: TextStyle(fontSize: 12, color: context.p.textSecondary)),
+            Expanded(
+              child: Row(children: [
+                Icon(Icons.palette_outlined, size: 16, color: context.p.primary),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(colour,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                      overflow: TextOverflow.ellipsis),
+                ),
+                const SizedBox(width: 8),
+                Text('${photos.length} shot${photos.length == 1 ? '' : 's'}',
+                    style: TextStyle(fontSize: 12, color: context.p.textSecondary)),
+              ]),
+            ),
+            FilledButton.icon(
+              onPressed: (_genColour != null || photos.isEmpty) ? null : () => _generate(colour),
+              icon: generating
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.auto_awesome, size: 18),
+              label: Text(generating ? 'Generating…' : 'Generate'),
+              style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+            ),
           ]),
           const SizedBox(height: 12),
           Wrap(spacing: 12, runSpacing: 12, children: [
@@ -274,8 +322,59 @@ class _VariantPhotosScreenState extends ConsumerState<VariantPhotosScreen> {
               onDelete: (_) {},
             ),
           ]),
+          if (generated.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Text('AI MODEL IMAGES',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.p.primary, letterSpacing: 0.5)),
+            const SizedBox(height: 8),
+            Wrap(spacing: 12, runSpacing: 12, children: [
+              for (var i = 0; i < generated.length; i++) _genTile(context, colour, generated, i),
+            ]),
+          ] else if (generating) ...[
+            const SizedBox(height: 10),
+            Text('Generating 5 poses — this can take up to a minute…',
+                style: TextStyle(fontSize: 12, color: context.p.textSecondary)),
+          ],
         ]),
       ),
+    );
+  }
+
+  Widget _genTile(BuildContext context, String colour, List<Map<String, dynamic>> gen, int i) {
+    const double size = 96;
+    final p = gen[i];
+    final data = (p['data'] ?? '') as String;
+    final pose = (p['prompt'] ?? '') as String;
+    return SizedBox(
+      width: size,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Stack(children: [
+          GestureDetector(
+            onTap: () => openPhotoViewer(
+              context,
+              images: [for (final g in gen) (g['data'] ?? '') as String],
+              initialIndex: i,
+              title: colour,
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.memory(base64Decode(data), width: size, height: size, fit: BoxFit.cover),
+            ),
+          ),
+          Positioned(
+            top: -6,
+            right: -6,
+            child: IconButton(
+              icon: const Icon(Icons.cancel, size: 20),
+              color: context.p.danger,
+              onPressed: () => _delete(colour, p['id'] as String),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 4),
+        Text(pose.isEmpty ? 'AI model' : pose,
+            style: TextStyle(fontSize: 11, color: context.p.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
+      ]),
     );
   }
 
