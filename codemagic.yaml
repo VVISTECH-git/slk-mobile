@@ -62,11 +62,14 @@ workflows:
         notify:
           success: true
           failure: true
-      # Uncomment once a Google Play service-account JSON is added in Codemagic:
-      # google_play:
-      #   credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
-      #   track: internal
-      #   submit_as_draft: true
+      # Auto-publish the AAB to Google Play. Requires GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+      # (a Play service-account JSON) in Codemagic env, and one prior MANUAL upload
+      # of this package so the app exists on Play. Change `track` to "production"
+      # only once the store listing + any required closed testing are complete.
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal
+        submit_as_draft: false
 
   # =========================================================================
   # iOS — signed IPA → TestFlight (runs on a Mac, so it works from Windows too)
