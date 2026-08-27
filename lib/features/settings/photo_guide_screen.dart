@@ -66,6 +66,7 @@ class PhotoGuideScreen extends ConsumerWidget {
           return ListView(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
             children: [
+              _sampleBanner(context),
               Padding(
                 padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
                 child: Text(
@@ -92,10 +93,33 @@ class PhotoGuideScreen extends ConsumerWidget {
     );
   }
 
+  // Clarifies that this screen holds SAMPLE/reference images (colour-agnostic),
+  // not the actual product photos — which are captured per colour elsewhere.
+  Widget _sampleBanner(BuildContext context) => Container(
+        margin: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: context.p.primary.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(Icons.info_outline, size: 18, color: context.p.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'These are SAMPLE shots — a how-to checklist. The actual product photos '
+              'are captured per colour on a product → “Add / manage product photos”.',
+              style: TextStyle(fontSize: 12, height: 1.35, color: context.p.textSecondary),
+            ),
+          ),
+        ]),
+      );
+
   Widget _empty(BuildContext context, WidgetRef ref) {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        _sampleBanner(context),
         const SizedBox(height: 12),
         Icon(Icons.photo_camera_back_outlined, size: 56, color: context.p.textSecondary),
         const SizedBox(height: 12),
