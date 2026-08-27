@@ -19,6 +19,7 @@ class CategoryRow {
     required this.productCount,
     this.pieceCount = 0,
     this.colourCount = 0,
+    this.coloursWithPhotos = 0,
     required this.status,
     this.code,
     this.ownCode,
@@ -45,7 +46,11 @@ class CategoryRow {
   final int productCount;
   final int pieceCount;
   final int colourCount;
+  final int coloursWithPhotos;
   final String status;
+
+  /// A tagged design where at least one colour variant has no captured photos.
+  bool get missingPhotos => colourCount > 0 && coloursWithPhotos < colourCount;
   final String? code;
   final String? ownCode;
   final String? parentId;
@@ -71,6 +76,7 @@ class CategoryRow {
         productCount: (j['productCount'] as num?)?.toInt() ?? 0,
         pieceCount: (j['pieceCount'] as num?)?.toInt() ?? 0,
         colourCount: (j['colourCount'] as num?)?.toInt() ?? 0,
+        coloursWithPhotos: (j['coloursWithPhotos'] as num?)?.toInt() ?? 0,
         status: (j['status'] ?? 'active') as String,
         code: j['code'] as String?,
         ownCode: j['ownCode'] as String?,

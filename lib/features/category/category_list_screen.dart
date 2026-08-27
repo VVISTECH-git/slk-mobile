@@ -433,6 +433,14 @@ class _CategoryCard extends StatelessWidget {
                           text: '${row.pieceCount} piece${row.pieceCount == 1 ? '' : 's'}'
                               '${row.colourCount > 0 ? ' · ${row.colourCount} colour${row.colourCount == 1 ? '' : 's'}' : ''}',
                         ),
+                        if (row.missingPhotos)
+                          _Pill(
+                            icon: Icons.warning_amber_rounded,
+                            text: row.coloursWithPhotos == 0
+                                ? 'No photos'
+                                : 'Photos ${row.coloursWithPhotos}/${row.colourCount}',
+                            warn: true,
+                          ),
                         if ((row.hsnCode ?? '').isNotEmpty)
                           _Pill(icon: Icons.receipt_long_outlined, text: 'HSN ${row.hsnCode}'),
                         if ((row.gstRate ?? '').isNotEmpty)
@@ -529,17 +537,20 @@ class _CodePill extends StatelessWidget {
 }
 
 class _Pill extends StatelessWidget {
-  const _Pill({required this.icon, required this.text});
+  const _Pill({required this.icon, required this.text, this.warn = false});
   final IconData icon;
   final String text;
+  final bool warn;
   @override
   Widget build(BuildContext context) {
+    final color = warn ? const Color(0xFFB45309) : context.p.textSecondary; // amber-700
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 15, color: context.p.textSecondary),
+        Icon(icon, size: 15, color: color),
         const SizedBox(width: 4),
-        Text(text, style: TextStyle(fontSize: 12, color: context.p.textSecondary)),
+        Text(text,
+            style: TextStyle(fontSize: 12, color: color, fontWeight: warn ? FontWeight.w600 : FontWeight.normal)),
       ],
     );
   }
