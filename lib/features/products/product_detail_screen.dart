@@ -10,6 +10,7 @@ import '../../widgets/theme_button.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/photo_viewer.dart';
 import 'product_providers.dart';
+import 'variant_photos_screen.dart';
 
 /// Read view of a product: identity, tax, and each variant with its prices and
 /// per-location stock. (Editing happens on the web portal / a later form.)
@@ -87,6 +88,18 @@ class ProductDetailScreen extends ConsumerWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: 16),
+              if (((p['categoryId'] ?? '') as String).isNotEmpty)
+                FilledButton.tonalIcon(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => VariantPhotosScreen(
+                      categoryId: p['categoryId'] as String,
+                      designName: (p['name'] ?? '') as String,
+                    ),
+                  )),
+                  icon: const Icon(Icons.photo_camera_back_outlined),
+                  label: const Text('Add / manage product photos'),
+                ),
               const SizedBox(height: 16),
               _PhotoGallery(groups: ((p['photoGroups'] as List?) ?? const [])),
               Text('Colours (${variants.length})',
