@@ -72,8 +72,11 @@ workflows:
       # only once the store listing + any required closed testing are complete.
       google_play:
         credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
-        track: internal
-        submit_as_draft: false
+        track: production
+        # Uploads to Production as a DRAFT — you review + roll out in Play Console.
+        # Requires the app's store listing + all declarations to be complete, or
+        # the publish step fails.
+        submit_as_draft: true
 
   # =========================================================================
   # iOS — signed IPA → TestFlight (runs on a Mac, so it works from Windows too)
