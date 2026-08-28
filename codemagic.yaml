@@ -32,6 +32,10 @@ workflows:
         # Name of the Android keystore reference in Codemagic → Code signing
         # identities (this must match exactly what you named it there).
         - slk
+      groups:
+        # Variable group holding GCLOUD_SERVICE_ACCOUNT_CREDENTIALS (the Play
+        # service-account JSON). Create this group in Codemagic and add that var.
+        - google_play
     scripts:
       - name: Flutter packages
         script: flutter pub get
