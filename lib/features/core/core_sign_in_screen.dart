@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/config.dart';
 import '../../theme/app_theme.dart';
@@ -73,7 +74,18 @@ class _CoreSignInScreenState extends ConsumerState<CoreSignInScreen> {
             device: _deviceLabel(),
           );
 
-      if (mounted) Navigator.of(context).pop();
+      if (!mounted) return;
+
+      /*
+        Pop only if there is something to pop back to.
+
+        This screen is reached two ways now: pushed from a record screen that
+        found nobody signed in, and routed as the app's front door. Popping the
+        front door would close the app; the router's redirect moves you on
+        instead, the moment the session changes.
+      */
+      final navigator = Navigator.of(context);
+      if (navigator.canPop()) navigator.pop();
     } catch (e) {
       // Both: the snackbar catches the eye, the inline copy is still there
       // when somebody looks up from the saree in their hands.
@@ -193,6 +205,29 @@ class _CoreSignInScreenState extends ConsumerState<CoreSignInScreen> {
                     CoreConfig.baseUrl,
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 11, color: p.textMuted),
+                  ),
+
+                  /*
+                    The way to the till, since the app now opens here.
+
+                    The mirror of the "Stock system" link on the till's own
+                    login. Both exist only until the till moves onto slk-core
+                    too and there is one sign-in; neither should outlive that.
+                  */
+                  const SizedBox(height: 10),
+                  Center(
+                    child: TextButton.icon(
+                      onPressed: () => context.push('/login'),
+                      icon: Icon(Icons.point_of_sale_outlined,
+                          size: 18, color: p.textSecondary),
+                      label: Text(
+                        'Go to the till',
+                        style: TextStyle(
+                          color: p.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),
