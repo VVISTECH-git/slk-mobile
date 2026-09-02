@@ -18,6 +18,9 @@ class _Module {
 // Phase 1: focus on Category only. The rest are parked (hidden from Home, not
 // deleted) — uncomment to bring a module back.
 const _modules = [
+  // The first screen on slk-core, the stock system. It signs in separately
+  // and lives beside the tantu screens while the migration runs.
+  _Module('New record', Icons.add_box_outlined, '/core/records/new'),
   _Module('Catalogue', Icons.category_outlined, '/category'),
   _Module('Products', Icons.inventory_2_outlined, '/products'),
   _Module('Tag pieces', Icons.qr_code_2, '/tag', ownerOnly: true),

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../theme/app_theme.dart';
 import '../../widgets/async_view.dart';
@@ -112,6 +113,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               ),
               // App-wide theme switch is also reachable here, before sign-in.
               const Positioned(top: 0, right: 4, child: ThemeButton()),
+
+              /*
+                The way through to slk-core, the stock system.
+
+                Outside the FutureBuilder above, deliberately. That builder
+                shows an error state when the till's staff list cannot be
+                loaded — which is exactly the moment somebody needs the other
+                system, and the moment a link placed inside the form would
+                have disappeared.
+
+                Here at all because the two systems sign in separately and
+                this screen is where the app lands. Without it the stock
+                screens are unreachable whenever nobody is signed in to the
+                till, which is most mornings.
+              */
+              const Positioned(left: 0, right: 0, bottom: 8, child: _StockSystemLink()),
             ],
           ),
         ),
@@ -187,6 +204,37 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               : const Text('Sign in'),
         ),
       ],
+    );
+  }
+}
+
+/// A quiet way into slk-core from the till's login screen.
+///
+/// Understated on purpose. Nearly everybody arriving here wants the till, and
+/// this is for the warehouse — loud enough to find when you are looking for
+/// it, quiet enough not to be tapped by mistake at a counter.
+///
+/// Temporary in the way the migration is temporary: when the till moves onto
+/// slk-core too there is one sign-in again and this goes away.
+class _StockSystemLink extends StatelessWidget {
+  const _StockSystemLink();
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+
+    return Center(
+      child: TextButton.icon(
+        onPressed: () => context.push('/core/records/new'),
+        icon: Icon(Icons.warehouse_outlined, size: 18, color: p.textSecondary),
+        label: Text(
+          'Stock system',
+          style: TextStyle(color: p.textSecondary, fontWeight: FontWeight.w600),
+        ),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        ),
+      ),
     );
   }
 }
