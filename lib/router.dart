@@ -18,8 +18,10 @@ import 'features/core/core_auth.dart';
 import 'features/core/core_home_screen.dart';
 import 'features/core/core_sign_in_screen.dart';
 import 'features/core/new_record_screen.dart';
+import 'features/core/photographs_screen.dart';
 import 'features/core/records_list_screen.dart';
 import 'features/core/record_photos_screen.dart';
+import 'features/core/stock_records_screen.dart';
 import 'features/stock/stock_screen.dart';
 import 'features/stock/movements_screen.dart';
 import 'features/pieces/scan_identify_screen.dart';
@@ -144,6 +146,17 @@ final routerProvider = Provider<GoRouter>((ref) {
           recordId: state.pathParameters['id']!,
           code: state.uri.queryParameters['code'] ?? 'record',
         ),
+      ),
+
+      // A saree in one hand, a phone in the other. Not a tab on the catalogue:
+      // a different question, asked in a different posture.
+      GoRoute(path: '/core/stock', builder: (_, _) => const StockRecordsScreen()),
+
+      // The shot list — what to point a camera at next. Reached from the home
+      // as well as from a record, because the two are different errands.
+      GoRoute(
+        path: '/core/photographs',
+        builder: (_, _) => const PhotographsScreen(),
       ),
 
       // POS + invoices — live.

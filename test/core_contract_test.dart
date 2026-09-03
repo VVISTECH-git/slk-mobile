@@ -113,6 +113,102 @@ void main() {
     });
   });
 
+  group('CoreShotListRow', () {
+    // GET /api/v1/photographs — verbatim.
+    final shot = <String, dynamic>{
+      'id': '6fa57655-fe13-4475-b93d-b707b112b8af',
+      'name': 'Kalamkari Cotton Saree',
+      'productCode': '300041',
+      'designCode': 'SAR-GEN-COT-0008',
+      'colour': 'Alice Blue',
+      'colourHex': '#F0F8FF',
+      'pending': ['Body', 'Pallu'],
+    };
+
+    test('parses a record with photographs outstanding', () {
+      final row = CoreShotListRow.fromJson(shot);
+
+      expect(row.id, '6fa57655-fe13-4475-b93d-b707b112b8af');
+      expect(row.productCode, '300041');
+      expect(row.designCode, 'SAR-GEN-COT-0008');
+      expect(row.pending, ['Body', 'Pallu']);
+      expect(row.swatch, const Color(0xFFF0F8FF));
+    });
+
+    test('a record with no consignment yet still parses', () {
+      // The list is about photographs, not deliveries, so a design nobody has
+      // received against still belongs on it — and the screen falls back to
+      // the design code for that one row rather than showing nothing.
+      final row = CoreShotListRow.fromJson({...shot, 'productCode': null});
+
+      expect(row.productCode, isNull);
+      expect(row.designCode, 'SAR-GEN-COT-0008');
+    });
+
+    test('the search matches a slot name, not only the product', () {
+      // Somebody with a light set up for pallus wants the pallu rows.
+      expect(CoreShotListRow.fromJson(shot).haystack, contains('pallu'));
+    });
+  });
+
+  group('CorePiece', () {
+    // GET /api/v1/pieces/500066 — verbatim.
+    final piece = <String, dynamic>{
+      'id': '60ec2171-7149-4f17-bd63-9b5ea06f6964',
+      'itemCode': '500066',
+      'productCode': '300032',
+      'serial': 1,
+      'designCode': 'SAR-GEN-SIL-0001',
+      'name': 'Kalamkari Silk Saree',
+      'colour': 'Beige',
+      'productType': 'Saree',
+      'motifCategory': 'Kolam',
+      'motif': null,
+      'location': 'Warehouse',
+      'isHeld': true,
+      'receivedInto': 'Warehouse',
+      'receivedAt': '02 Sep 2026',
+      'receivedOn': '2026-09-02',
+      'reference': null,
+      'priceMinor': 349999,
+    };
+
+    test('parses a scan', () {
+      final parsed = CorePiece.fromJson(piece);
+
+      expect(parsed.itemCode, '500066');
+      expect(parsed.productCode, '300032');
+      expect(parsed.location, 'Warehouse');
+      expect(parsed.isHeld, isTrue);
+      expect(parsed.price, '₹3,500');
+    });
+
+    test('a piece that has left us reads as gone, not as unknown', () {
+      // The ledger nulls the location once it is sold, written off or sent
+      // on. "Is this still ours" is the first thing a scan answers, so the
+      // two must not be confused.
+      final gone = CorePiece.fromJson({
+        ...piece,
+        'isHeld': false,
+        'location': null,
+      });
+
+      expect(gone.isHeld, isFalse);
+      expect(gone.location, isNull);
+    });
+
+    test('a price arriving as a string is still a price', () {
+      // bigint through db.execute used to reach the app as "349999". The API
+      // casts now, but a phone cannot be redeployed the way a server can.
+      expect(CorePiece.fromJson({...piece, 'priceMinor': '349999'}).price,
+          '₹3,500');
+    });
+
+    test('an unpriced piece says so rather than reading as free', () {
+      expect(CorePiece.fromJson({...piece, 'priceMinor': null}).price, '—');
+    });
+  });
+
   group('CoreLocation', () {
     // GET /api/v1/locations — verbatim, in the order the API returns.
     final locations = [

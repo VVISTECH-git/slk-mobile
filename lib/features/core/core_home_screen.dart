@@ -99,13 +99,13 @@ const _modules = [
     'Stock Records',
     'Scan a piece, count what is here',
     Icons.qr_code_scanner,
-    null,
+    '/core/stock',
   ),
   _Module(
     'Photographs',
     'Everything still waiting to be shot',
     Icons.photo_camera_outlined,
-    null,
+    '/core/photographs',
   ),
 ];
 
