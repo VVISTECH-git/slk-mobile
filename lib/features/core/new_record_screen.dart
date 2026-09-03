@@ -164,13 +164,32 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen> {
 
       final id = ((created as Map).cast<String, dynamic>())['id'] as String;
 
-      // Read it back for the code — SAR-SRI-SIL-0042 — which is what gets
-      // printed on the label and what the person who just filed it will be
-      // asked about.
+      /*
+        Read it back for the product code — 300042 — not the design code.
+
+        The design code is internal and repeats; it describes what somebody
+        answered on this form and two people filing the same saree will mint
+        different ones. The product code is the consignment that just arrived,
+        and it is the number on the paperwork in their hands. Confirming with
+        the design code told them the one thing they would never be asked
+        about.
+
+        `consignments` comes back newest first, so the one this submission
+        created is at the front. It is empty when no opening stock was
+        entered — a record can exist before anything has arrived — and only
+        then is the design code worth saying, because it is all there is.
+      */
       String? code;
       try {
-        final record = await api.get('/records/$id');
-        code = ((record as Map).cast<String, dynamic>())['code'] as String?;
+        final record =
+            ((await api.get('/records/$id')) as Map).cast<String, dynamic>();
+
+        final consignments = record['consignments'] as List? ?? const [];
+
+        code = consignments.isEmpty
+            ? record['code'] as String?
+            : ((consignments.first as Map).cast<String, dynamic>()['code']
+                as String?);
       } catch (_) {
         // The record exists either way.
       }

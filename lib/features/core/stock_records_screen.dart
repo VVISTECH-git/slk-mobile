@@ -377,9 +377,13 @@ class _PieceCard extends StatelessWidget {
           if (piece.colour != null) _Fact(label: 'Colour', value: piece.colour!),
           if (piece.productType != null)
             _Fact(label: 'Type', value: piece.productType!),
-          _Fact(label: 'Design', value: piece.designCode),
+          // Consignment before design, and that ordering is the point: the
+          // product code is what the paperwork says, the design code is
+          // internal and repeats. Kept only because a scan is also how
+          // somebody finds their way back to the record.
           if (piece.productCode != null)
             _Fact(label: 'Consignment', value: piece.productCode!),
+          _Fact(label: 'Design', value: piece.designCode),
           if (piece.receivedAt != null)
             _Fact(
               label: 'Received',

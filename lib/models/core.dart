@@ -170,7 +170,11 @@ class CoreRecordRow {
 
   final String id;
 
-  /// The design code — SAR-SRI-SIL-0001. What is printed on the QR label.
+  /// The design code — SAR-SRI-SIL-0001. Internal, and it repeats.
+  ///
+  /// Not what is on the label: a QR carries the item code or the product
+  /// code. This is here to be searched on, not to be led with — see
+  /// [productCode], which is the number anybody on the floor is holding.
   final String code;
   final String name;
 

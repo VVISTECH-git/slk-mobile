@@ -30,8 +30,12 @@ class RecordPhotosScreen extends ConsumerStatefulWidget {
 
   final String recordId;
 
-  /// The design code, shown so somebody photographing a pile of sarees can see
-  /// which one this screen is about.
+  /// The product code, shown so somebody photographing a pile of sarees can
+  /// see which one this screen is about.
+  ///
+  /// The consignment — 300042 — because that is what is written on what they
+  /// are holding. Callers fall back to the design code only for a record
+  /// nothing has arrived against yet, where there is no product code to show.
   final String code;
 
   @override
