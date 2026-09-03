@@ -207,28 +207,9 @@ class _CoreSignInScreenState extends ConsumerState<CoreSignInScreen> {
                     style: TextStyle(fontSize: 11, color: p.textMuted),
                   ),
 
-                  /*
-                    The way to the till, since the app now opens here.
-
-                    The mirror of the "Stock system" link on the till's own
-                    login. Both exist only until the till moves onto slk-core
-                    too and there is one sign-in; neither should outlive that.
-                  */
-                  const SizedBox(height: 10),
-                  Center(
-                    child: TextButton.icon(
-                      onPressed: () => context.push('/login'),
-                      icon: Icon(Icons.point_of_sale_outlined,
-                          size: 18, color: p.textSecondary),
-                      label: Text(
-                        'Go to the till',
-                        style: TextStyle(
-                          color: p.textSecondary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
+                  // No link to the till: it is retired, and an app that offers
+                  // a way into a system nobody uses is an app that has to
+                  // explain itself.
                 ],
               ),
             ),

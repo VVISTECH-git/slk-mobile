@@ -15,8 +15,10 @@ import 'features/products/variant_photos_screen.dart';
 import 'features/category/category_list_screen.dart';
 import 'features/category/category_form_screen.dart';
 import 'features/core/core_auth.dart';
+import 'features/core/core_home_screen.dart';
 import 'features/core/core_sign_in_screen.dart';
 import 'features/core/new_record_screen.dart';
+import 'features/core/records_list_screen.dart';
 import 'features/core/record_photos_screen.dart';
 import 'features/stock/stock_screen.dart';
 import 'features/stock/movements_screen.dart';
@@ -58,20 +60,29 @@ final routerProvider = Provider<GoRouter>((ref) {
 
   return GoRouter(
     /*
-      slk-core is the app's front door.
+      This is the slk-core app now.
 
-      The app opens on the stock system, not the till. That is the direction
-      the migration runs in — slk-core owns stock and tantu is being retired —
-      and it is what somebody opening this on a warehouse floor wants. The till
-      is still reachable, by a link on the sign-in screen, until it moves over
-      too.
+      It opened on tantu's login and the stock screens hung off the side of it.
+      tantu is retired, so the relationship is the other way round and then
+      gone: the home is slk-core's, the sign-in is slk-core's, and the till
+      screens below are dead code awaiting deletion.
     */
-    initialLocation: '/core/records/new',
+    initialLocation: '/',
     refreshListenable: refresh,
     redirect: (context, state) {
       final core = ref.read(coreAuthProvider);
       final auth = ref.read(authControllerProvider);
       final loc = state.matchedLocation;
+
+      /*
+        The home is slk-core's now — tantu is retired.
+
+        `/` used to be the till's home and everything hung off it. The till
+        screens below still compile and still guard themselves on the tantu
+        session, but nothing routes to them any more: they are dead weight to
+        be deleted, not a second half of the app.
+      */
+      final isCore = loc == '/' || loc.startsWith('/core');
 
       /*
         Splash belongs to whichever system is the front door, and that is
@@ -81,44 +92,44 @@ final routerProvider = Provider<GoRouter>((ref) {
       */
       if (loc == '/splash') {
         if (core.status == CoreAuthStatus.unknown) return null;
-        return core.isSignedIn ? '/core/records/new' : '/core/sign-in';
+        return core.isSignedIn ? '/' : '/core/sign-in';
       }
 
-      // The stock system, gated by its own session.
-      if (loc.startsWith('/core')) {
+      if (isCore) {
         if (core.status == CoreAuthStatus.unknown) return '/splash';
         if (!core.isSignedIn) return loc == '/core/sign-in' ? null : '/core/sign-in';
         // Signed in — the sign-in screen has nothing left to ask.
-        if (loc == '/core/sign-in') return '/core/records/new';
+        if (loc == '/core/sign-in') return '/';
         return null;
       }
 
-      /*
-        The till, reached from the link on the stock sign-in. Still its own
-        session and its own login: two systems, two sets of credentials, until
-        the migration finishes and there is one.
-      */
+      // The retired till screens, still guarding themselves. Unreachable from
+      // anywhere in the app; here only until they are deleted.
       if (!auth.isSignedIn) return loc == '/login' ? null : '/login';
-      if (loc == '/login') return '/';
       return null;
     },
     routes: [
       GoRoute(path: '/splash', builder: (_, _) => const SplashScreen()),
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
-      GoRoute(path: '/', builder: (_, _) => const HomeScreen()),
+      // The home. slk-core's, since tantu was retired.
+      GoRoute(path: '/', builder: (_, _) => const CoreHomeScreen()),
 
       /*
-        slk-core, the stock system, and where the app opens.
+        slk-core — which is to say, the app.
 
-        Under its own path prefix because it is a different backend with a
-        different sign-in, and while the migration runs both are live. The
-        redirect above gates these on the slk-core session and everything else
-        on the till's, so signing out of one leaves the other alone.
+        Still under a /core prefix, which is now only history: it marked these
+        out while there was another backend to tell them apart from. Worth
+        flattening when the till screens go, and not before, or every path in
+        the app changes twice.
       */
       // Routed, not only pushed: it is where the app opens when nobody is
       // signed in, so the redirect above has to be able to name it.
       GoRoute(path: '/core/sign-in', builder: (_, _) => const CoreSignInScreen()),
+
+      // Static before dynamic, so /core/records/new is not read as a record
+      // whose id happens to be "new".
       GoRoute(path: '/core/records/new', builder: (_, _) => const NewRecordScreen()),
+      GoRoute(path: '/core/records', builder: (_, _) => const RecordsListScreen()),
 
       /*
         Photographs for a record that already exists.

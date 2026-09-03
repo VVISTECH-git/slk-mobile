@@ -249,7 +249,7 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen> {
       child: Scaffold(
         backgroundColor: context.p.surface1,
         appBar: AppBar(
-          title: const Text('New record'),
+          title: const Text('Product Management'),
           actions: [
             IconButton(
               tooltip: 'Sign out of slk-core',
@@ -1099,7 +1099,7 @@ class _SignInPrompt extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: context.p.surface1,
-      appBar: AppBar(title: const Text('New record')),
+      appBar: AppBar(title: const Text('Product Management')),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
