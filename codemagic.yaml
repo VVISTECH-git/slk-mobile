@@ -1,7 +1,7 @@
 # Codemagic CI/CD for SLK Mobile (Flutter).
 # ---------------------------------------------------------------------------
 # Two workflows: Android (APK + AAB) and iOS (IPA → TestFlight). The app points
-# at the live API by default (lib/core/config.dart → Render URL); override per
+# at the live API by default (lib/core/config.dart → Vercel URL); override per
 # build with --dart-define=API_BASE_URL=... if you need staging.
 #
 # ONE-TIME SETUP in the Codemagic UI (nothing here needs your password in the repo):
