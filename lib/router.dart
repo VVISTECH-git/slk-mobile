@@ -20,6 +20,7 @@ import 'features/core/core_sign_in_screen.dart';
 import 'features/core/new_record_screen.dart';
 import 'features/core/photographs_screen.dart';
 import 'features/core/records_list_screen.dart';
+import 'features/core/record_detail_screen.dart';
 import 'features/core/record_photos_screen.dart';
 import 'features/core/stock_records_screen.dart';
 import 'features/stock/stock_screen.dart';
@@ -132,6 +133,16 @@ final routerProvider = Provider<GoRouter>((ref) {
       // whose id happens to be "new".
       GoRoute(path: '/core/records/new', builder: (_, _) => const NewRecordScreen()),
       GoRoute(path: '/core/records', builder: (_, _) => const RecordsListScreen()),
+
+      // A record that already exists — the same fields the create form asks,
+      // seeded from what is there and open to correction. Reached by tapping
+      // a row in the catalogue.
+      GoRoute(
+        path: '/core/records/:id',
+        builder: (_, state) => RecordDetailScreen(
+          recordId: state.pathParameters['id']!,
+        ),
+      ),
 
       /*
         Photographs for a record that already exists.

@@ -66,10 +66,11 @@ class CoreActor {
 
   /// floor · office · owner. The API enforces it; this is for showing.
   ///
-  /// No client-side gate on creating a record: every signed-in actor may,
-  /// floor included, because whoever is holding the delivery is who enters it.
-  /// Editing an existing record still needs office, which this app does not
-  /// do yet — when it does, the 403 is what to check, not a rule copied here.
+  /// No client-side gate on creating or editing a record: every signed-in
+  /// actor may, floor included, because whoever is holding the delivery is
+  /// who enters it and who is best placed to correct their own typo. The API
+  /// is still the one deciding — a 403 is what to check, not a rule copied
+  /// here.
   final String role;
 
   factory CoreActor.fromJson(Map<String, dynamic> json) => CoreActor(
@@ -364,5 +365,234 @@ class CoreLocation {
         code: json['code'] as String,
         name: json['name'] as String,
         isInternal: json['isInternal'] == true,
+      );
+}
+
+/// A record, whole — everything the editor needs, ported field for field from
+/// `RecordDetail` on the server rather than trimmed to a subset.
+///
+/// `CoreRecordRow` is deliberately a subset because the catalogue is a list of
+/// a hundred and fifty of these; this is the one somebody is looking at, and
+/// an editor that cannot show a field cannot let anyone correct it.
+class CoreRecordDetail {
+  const CoreRecordDetail({
+    required this.id,
+    required this.designId,
+    required this.code,
+    required this.name,
+    required this.nameIsCustom,
+    required this.isSerialised,
+    this.notes,
+    this.colourId,
+    this.secondaryColourId,
+    this.costMinor,
+    this.makingMinor,
+    this.wholesaleMinor,
+    this.retailMinor,
+    this.mrpMinor,
+    required this.attributes,
+    required this.siblings,
+    required this.stock,
+    required this.consignments,
+    required this.images,
+    required this.descriptors,
+  });
+
+  final String id;
+  final String designId;
+
+  /// The design code — SAR-SRI-SIL-0001. See [CoreRecordRow.code].
+  final String code;
+  final String name;
+  final bool nameIsCustom;
+  final bool isSerialised;
+  final String? notes;
+
+  final String? colourId;
+  final String? secondaryColourId;
+
+  final int? costMinor;
+  final int? makingMinor;
+  final int? wholesaleMinor;
+  final int? retailMinor;
+  final int? mrpMinor;
+
+  /// Attribute key → chosen lookup value id. The same shape the create form
+  /// sends, so an edit can be seeded from it and diffed against nothing.
+  final Map<String, String?> attributes;
+
+  /// Every other colour under this design. Attributes belong to the design,
+  /// not the colourway — changing one here changes it for all of them, which
+  /// is worth saying before somebody does it by accident.
+  final List<CoreSibling> siblings;
+
+  final CoreStock stock;
+
+  /// What arrived, and when — newest first. See [CoreShotListRow] for the
+  /// photograph side of a record; this is the goods side.
+  final List<CoreConsignment> consignments;
+
+  /// The photographs this product wants. A null `url` is an empty slot — the
+  /// shot list, from inside the one record it belongs to.
+  final List<CoreImageSlot> images;
+
+  /// The adjectives on the design, as lookup value ids.
+  final List<String> descriptors;
+
+  factory CoreRecordDetail.fromJson(Map<String, dynamic> json) =>
+      CoreRecordDetail(
+        id: json['id'] as String,
+        designId: json['designId'] as String,
+        code: json['code'] as String,
+        name: json['name'] as String,
+        nameIsCustom: json['nameIsCustom'] == true,
+        isSerialised: json['isSerialised'] == true,
+        notes: json['notes'] as String?,
+        colourId: json['colourId'] as String?,
+        secondaryColourId: json['secondaryColourId'] as String?,
+        costMinor: _intOf(json['costMinor']),
+        makingMinor: _intOf(json['makingMinor']),
+        wholesaleMinor: _intOf(json['wholesaleMinor']),
+        retailMinor: _intOf(json['retailMinor']),
+        mrpMinor: _intOf(json['mrpMinor']),
+        attributes: {
+          for (final e in ((json['attributes'] as Map?) ?? const {}).entries)
+            '${e.key}': e.value as String?,
+        },
+        siblings: [
+          for (final s in (json['siblings'] as List? ?? const []))
+            CoreSibling.fromJson((s as Map).cast<String, dynamic>()),
+        ],
+        stock: CoreStock.fromJson(
+          ((json['stock'] as Map?) ?? const {}).cast<String, dynamic>(),
+        ),
+        consignments: [
+          for (final c in (json['consignments'] as List? ?? const []))
+            CoreConsignment.fromJson((c as Map).cast<String, dynamic>()),
+        ],
+        images: [
+          for (final i in (json['images'] as List? ?? const []))
+            CoreImageSlot.fromJson((i as Map).cast<String, dynamic>()),
+        ],
+        descriptors: [
+          for (final d in (json['descriptors'] as List? ?? const [])) '$d',
+        ],
+      );
+}
+
+/// Another colour under the same design as the record being edited.
+class CoreSibling {
+  const CoreSibling({required this.id, this.colour});
+  final String id;
+  final String? colour;
+
+  factory CoreSibling.fromJson(Map<String, dynamic> json) => CoreSibling(
+        id: json['id'] as String,
+        colour: json['colour'] as String?,
+      );
+}
+
+/// The ledger, summarised — six running totals and where what remains sits.
+class CoreStock {
+  const CoreStock({
+    required this.onHand,
+    required this.received,
+    required this.sold,
+    required this.damaged,
+    required this.returned,
+    required this.adjusted,
+    required this.byLocation,
+  });
+
+  final int onHand;
+  final int received;
+  final int sold;
+  final int damaged;
+  final int returned;
+  final int adjusted;
+  final List<CoreStockAtLocation> byLocation;
+
+  factory CoreStock.fromJson(Map<String, dynamic> json) => CoreStock(
+        onHand: _intOf(json['onHand']) ?? 0,
+        received: _intOf(json['received']) ?? 0,
+        sold: _intOf(json['sold']) ?? 0,
+        damaged: _intOf(json['damaged']) ?? 0,
+        returned: _intOf(json['returned']) ?? 0,
+        adjusted: _intOf(json['adjusted']) ?? 0,
+        byLocation: [
+          for (final l in (json['byLocation'] as List? ?? const []))
+            CoreStockAtLocation.fromJson((l as Map).cast<String, dynamic>()),
+        ],
+      );
+}
+
+class CoreStockAtLocation {
+  const CoreStockAtLocation({required this.location, required this.qty});
+  final String location;
+  final int qty;
+
+  factory CoreStockAtLocation.fromJson(Map<String, dynamic> json) =>
+      CoreStockAtLocation(
+        location: json['location'] as String,
+        qty: _intOf(json['qty']) ?? 0,
+      );
+}
+
+/// One delivery — a product code and the item codes minted under it.
+class CoreConsignment {
+  const CoreConsignment({
+    required this.id,
+    required this.code,
+    required this.qty,
+    this.location,
+    required this.receivedAt,
+    this.reference,
+    this.note,
+    required this.items,
+  });
+
+  final String id;
+
+  /// 300001 and up.
+  final String code;
+  final int qty;
+  final String? location;
+
+  /// "03 Sep 2026", already formatted — the same reason `CorePiece` gets one.
+  final String receivedAt;
+  final String? reference;
+  final String? note;
+
+  /// The item codes minted under this consignment. Empty for unserialised
+  /// cloth, which arrives as a quantity rather than as pieces.
+  final List<String> items;
+
+  factory CoreConsignment.fromJson(Map<String, dynamic> json) =>
+      CoreConsignment(
+        id: json['id'] as String,
+        code: json['code'] as String,
+        qty: _intOf(json['qty']) ?? 0,
+        location: json['location'] as String?,
+        receivedAt: json['receivedAt'] as String,
+        reference: json['reference'] as String?,
+        note: json['note'] as String?,
+        items: [
+          for (final i in (json['items'] as List? ?? const [])) '$i',
+        ],
+      );
+}
+
+/// One wanted photograph, whether or not it has been taken.
+class CoreImageSlot {
+  const CoreImageSlot({this.slotId, this.url});
+
+  final String? slotId;
+
+  /// Null until somebody photographs it — this is the shot list.
+  final String? url;
+
+  factory CoreImageSlot.fromJson(Map<String, dynamic> json) => CoreImageSlot(
+        slotId: json['slotId'] as String?,
+        url: json['url'] as String?,
       );
 }

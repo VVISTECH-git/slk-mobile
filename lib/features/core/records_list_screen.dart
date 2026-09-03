@@ -203,15 +203,10 @@ class _Row extends StatelessWidget {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        // Photographs are the one thing this app can already do to an existing
-        // record. Editing lands on the same screen when it is built.
-        onTap: () => context.push(
-          // The consignment, not the design code — the same reason the row
-          // leads with it. Falls back only where nothing has arrived yet and
-          // there is no product code to show.
-          '/core/records/${record.id}/photos'
-          '?code=${Uri.encodeComponent(record.productCode ?? record.code)}',
-        ),
+        // The record, whole — every field the create form asks, seeded and
+        // open to correction. Photographs are one tap from there, not
+        // the destination in themselves.
+        onTap: () => context.push('/core/records/${record.id}'),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
