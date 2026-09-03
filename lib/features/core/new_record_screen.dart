@@ -162,36 +162,53 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen> {
         'nameIsCustom': _nameIsCustom,
       });
 
-      final id = ((created as Map).cast<String, dynamic>())['id'] as String;
+      final answer = (created as Map).cast<String, dynamic>();
+      final id = answer['id'] as String;
 
       /*
-        Read it back for the product code — 300042 — not the design code.
+        The product code — 300042 — not the design code.
 
         The design code is internal and repeats; it describes what somebody
-        answered on this form and two people filing the same saree will mint
+        answered on this form, and two people filing the same saree will mint
         different ones. The product code is the consignment that just arrived,
         and it is the number on the paperwork in their hands. Confirming with
         the design code told them the one thing they would never be asked
         about.
 
-        `consignments` comes back newest first, so the one this submission
-        created is at the front. It is empty when no opening stock was
-        entered — a record can exist before anything has arrived — and only
-        then is the design code worth saying, because it is all there is.
+        It comes back from the create itself. This used to create, then GET
+        the record, then take `consignments[0]` — and against production that
+        second request returned an empty list, so a real submission announced
+        "Created SAR-GEN-COT-0002". Reading it from the write cannot race.
       */
-      String? code;
-      try {
-        final record =
-            ((await api.get('/records/$id')) as Map).cast<String, dynamic>();
+      final minted = [
+        for (final c in (answer['productCodes'] as List? ?? const [])) '$c',
+      ];
 
-        final consignments = record['consignments'] as List? ?? const [];
+      String? code = minted.isEmpty ? null : minted.join(', ');
 
-        code = consignments.isEmpty
-            ? record['code'] as String?
-            : ((consignments.first as Map).cast<String, dynamic>()['code']
-                as String?);
-      } catch (_) {
-        // The record exists either way.
+      /*
+        Nothing minted, so ask.
+
+        Two ways to get here and they mean different things. A retry answered
+        from the idempotency store carries no codes even though the first
+        attempt minted some — the record has consignments and this finds them.
+        A record filed before any stock arrived has none to find, and then the
+        design code is all there is to say.
+      */
+      if (code == null) {
+        try {
+          final record =
+              ((await api.get('/records/$id')) as Map).cast<String, dynamic>();
+
+          final consignments = record['consignments'] as List? ?? const [];
+
+          code = consignments.isEmpty
+              ? record['code'] as String?
+              : ((consignments.first as Map).cast<String, dynamic>()['code']
+                  as String?);
+        } catch (_) {
+          // The record exists either way.
+        }
       }
 
       if (!mounted) return;
