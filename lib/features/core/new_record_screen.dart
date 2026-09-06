@@ -32,7 +32,18 @@ import 'record_photos_screen.dart';
 /// creating: opening stock instead of a ledger, an idempotency key, and a
 /// reset for the next delivery rather than a save that returns to a record.
 class NewRecordScreen extends ConsumerStatefulWidget {
-  const NewRecordScreen({super.key});
+  const NewRecordScreen({super.key, this.seedFrom});
+
+  /// An existing record to copy the design from — every attribute, the craft
+  /// and details answers, and which photographs are wanted.
+  ///
+  /// Colour, prices, name and opening stock are left for the form to ask
+  /// fresh: those are what make one colourway different from the next under
+  /// the same design (see [RecordFormFields._resetForNext] downstream, which
+  /// treats the same split the other way — repeats kept, colourway cleared).
+  /// Filing five colours of one saree should mean answering "which colour"
+  /// five times, not the other thirty questions five times too.
+  final CoreRecordDetail? seedFrom;
 
   @override
   ConsumerState<NewRecordScreen> createState() => _NewRecordScreenState();
@@ -283,7 +294,17 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
               // and the rest, so the common case is already filled in.
               if (!_defaultsApplied) {
                 _defaultsApplied = true;
-                attrs.addAll(defaultAttributes(opts));
+                final seed = widget.seedFrom;
+                if (seed != null) {
+                  attrs.addAll(seed.attributes);
+                  descriptors = List.of(seed.descriptors);
+                  imageSlots = [
+                    for (final image in seed.images)
+                      if (image.slotId != null) image.slotId!,
+                  ];
+                } else {
+                  attrs.addAll(defaultAttributes(opts));
+                }
               }
 
               return _tabs(opts, places, auth.actor!);
@@ -343,6 +364,14 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
             // recorded against them.
             SignedInActor(actor: _actor!),
             const SizedBox(height: 14),
+            if (widget.seedFrom != null) ...[
+              RecordNote(
+                'Copied from ${widget.seedFrom!.code} — same design, craft '
+                'and photo slots. Colour, price and name are still this '
+                "colourway's own.",
+              ),
+              const SizedBox(height: 4),
+            ],
           ],
           footer: [
             const SizedBox(height: 12),

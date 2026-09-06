@@ -7,6 +7,7 @@ import '../../models/core.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/async_view.dart';
 import 'core_auth.dart';
+import 'new_record_screen.dart';
 import 'record_fields.dart';
 import 'record_form_fields.dart';
 import 'record_photos_screen.dart';
@@ -196,6 +197,17 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
     );
   }
 
+  /// A new colourway of this same design, one tap away from the record it
+  /// came from rather than thirty fields re-typed from a saree lying next to
+  /// it. See [NewRecordScreen.seedFrom] for exactly what carries over.
+  void _duplicate() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => NewRecordScreen(seedFrom: _current),
+      ),
+    );
+  }
+
   // ── Building ──────────────────────────────────────────────────────────────
 
   @override
@@ -210,6 +222,11 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
         appBar: AppBar(
           title: _Title(code: _displayCode, designCode: _current?.code),
           actions: [
+            IconButton(
+              tooltip: 'Duplicate as a new colourway',
+              icon: const Icon(Icons.copy_outlined),
+              onPressed: _current == null ? null : _duplicate,
+            ),
             IconButton(
               tooltip: 'Photographs',
               icon: const Icon(Icons.photo_camera_outlined),
