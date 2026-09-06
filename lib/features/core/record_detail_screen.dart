@@ -12,6 +12,7 @@ import 'new_record_screen.dart';
 import 'record_fields.dart';
 import 'record_form_fields.dart';
 import 'record_photos_screen.dart';
+import 'records_list_screen.dart';
 
 /// A record that already exists, shown the way it was entered and open to
 /// correction.
@@ -226,6 +227,9 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
 
     if (message == null || !mounted) return;
     showOk(context, message);
+    // Otherwise Products List still shows this row until somebody pulls to
+    // refresh — it was never told the record it's holding just vanished.
+    ref.invalidate(coreRecordsProvider);
     Navigator.of(context).pop();
   }
 
@@ -447,7 +451,9 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
           uom: uom,
           onRecorded: (message) {
             showOk(context, message);
-            setState(() => _record = _load());
+            setState(() {
+              _record = _load();
+            });
           },
         ),
 
@@ -547,7 +553,9 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
               recordId: widget.recordId,
               consignment: c,
               canPublish: canPublish,
-              onChanged: () => setState(() => _record = _load()),
+              onChanged: () => setState(() {
+                _record = _load();
+              }),
             ),
       ],
     );
