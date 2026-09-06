@@ -31,7 +31,7 @@ class SettingsRepository {
     await ref.read(apiClientProvider).post('/settings/staff', body: {
       'name': name,
       'pin': pin,
-      if (storeId != null) 'storeId': storeId,
+      'storeId': ?storeId,
       'role': role,
     });
   }
@@ -39,7 +39,7 @@ class SettingsRepository {
   Future<void> updateStaff(String id, {required String name, String? storeId, required String role, String? pin}) async {
     await ref.read(apiClientProvider).patch('/settings/staff/$id', body: {
       'name': name,
-      if (storeId != null) 'storeId': storeId,
+      'storeId': ?storeId,
       'role': role,
       if (pin != null && pin.isNotEmpty) 'pin': pin,
     });
@@ -62,14 +62,14 @@ class SettingsRepository {
   Future<void> addCategory(String name, String? parentId) async {
     await ref.read(apiClientProvider).post('/settings/categories', body: {
       'name': name,
-      if (parentId != null) 'parentId': parentId,
+      'parentId': ?parentId,
     });
   }
 
   Future<void> updateCategory(String id, {String? name, String? code}) async {
     await ref.read(apiClientProvider).patch('/settings/categories/$id', body: {
-      if (name != null) 'name': name,
-      if (code != null) 'code': code,
+      'name': ?name,
+      'code': ?code,
     });
   }
 
@@ -95,7 +95,7 @@ class SettingsRepository {
       'label': label,
       'required': required,
       'position': position,
-      if (guide != null) 'guide': guide,
+      'guide': ?guide,
     };
     if (id == null) {
       await ref.read(apiClientProvider).post('/categories/$categoryId/photo-slots', body: body);

@@ -36,8 +36,8 @@ class StockRepository {
       'variantId': variantId,
       'locationId': locationId,
       'quantity': quantity,
-      if (reference != null) 'reference': reference,
-      if (note != null) 'note': note,
+      'reference': ?reference,
+      'note': ?note,
     });
   }
 
@@ -51,7 +51,7 @@ class StockRepository {
       'variantId': variantId,
       'locationId': locationId,
       'delta': delta,
-      if (note != null) 'note': note,
+      'note': ?note,
     });
   }
 
@@ -67,7 +67,7 @@ class StockRepository {
       'fromLocationId': fromLocationId,
       'toLocationId': toLocationId,
       'quantity': quantity,
-      if (note != null) 'note': note,
+      'note': ?note,
     });
   }
 }

@@ -244,6 +244,7 @@ class PhotoGuideScreen extends ConsumerWidget {
       ),
     );
     if (ok == true) {
+      // ignore: use_build_context_synchronously — _guard checks context.mounted itself
       await _guard(context, ref, () => _repo(ref).deletePhotoSlot(slot['id'] as String));
     }
   }
@@ -323,6 +324,7 @@ class PhotoGuideScreen extends ConsumerWidget {
       builder: (_) => _SlotEditor(existing: existing),
     );
     if (result == null) return;
+    // ignore: use_build_context_synchronously — _guard checks context.mounted itself
     await _guard(context, ref, () => _repo(ref).savePhotoSlot(
           id: existing?['id'] as String?,
           categoryId: categoryId,

@@ -88,6 +88,7 @@ class MasterDataScreen extends ConsumerWidget {
                 onAdd: () async {
                   final name = await _promptName(context, 'New location');
                   if (name != null && name.isNotEmpty) {
+                    // ignore: use_build_context_synchronously — _guard checks context.mounted itself
                     await _guard(context, ref, () => _repo(ref).addLocation(name, 'retail'));
                   }
                 },
@@ -130,6 +131,7 @@ class MasterDataScreen extends ConsumerWidget {
       onAdd: () async {
         final name = await _promptName(context, 'New ${title.toLowerCase().replaceAll(RegExp(r's$'), '')}');
         if (name != null && name.isNotEmpty) {
+          // ignore: use_build_context_synchronously — _guard checks context.mounted itself
           await _guard(context, ref, () => _repo(ref).addAttribute(kind, name));
         }
       },

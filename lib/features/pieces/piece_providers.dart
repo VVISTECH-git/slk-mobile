@@ -81,7 +81,7 @@ class PieceRepository {
     final data = await ref.read(apiClientProvider).post('/pieces/receive', body: {
       'orderId': orderId,
       'codes': codes,
-      if (missingReason != null) 'missingReason': missingReason,
+      'missingReason': ?missingReason,
     });
     return (data as Map).cast<String, dynamic>();
   }
@@ -99,7 +99,7 @@ class PieceRepository {
       'channel': channel,
       'paymentMode': paymentMode,
       'discount': discount,
-      if (customer != null) 'customer': customer,
+      'customer': ?customer,
     });
     return (data as Map).cast<String, dynamic>();
   }

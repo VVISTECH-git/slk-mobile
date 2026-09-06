@@ -52,7 +52,7 @@ class TransferRepository {
       'fromLocationId': fromLocationId,
       'toLocationId': toLocationId,
       'items': [for (final i in items) {'variantId': i.variantId, 'quantity': i.quantity}],
-      if (note != null) 'note': note,
+      'note': ?note,
     });
     return (data as Map)['id'] as String;
   }

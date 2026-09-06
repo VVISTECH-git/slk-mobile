@@ -74,6 +74,7 @@ class SettingsScreen extends ConsumerWidget {
               _SectionHeader('Staff & PINs', onAdd: () async {
                 final res = await showStaffDialog(context, stores: stores);
                 if (res != null) {
+                  // ignore: use_build_context_synchronously — _guard checks context.mounted itself
                   await _guard(context, ref, () => _repo(ref).addStaff(
                         name: res.name, pin: res.pin ?? '', storeId: res.storeId, role: res.role));
                 }
@@ -89,6 +90,7 @@ class SettingsScreen extends ConsumerWidget {
                         if (v == 'edit') {
                           final res = await showStaffDialog(context, stores: stores, existing: m.cast<String, dynamic>());
                           if (res != null) {
+                            // ignore: use_build_context_synchronously — _guard checks context.mounted itself
                             await _guard(context, ref, () => _repo(ref).updateStaff(m['id'] as String,
                                 name: res.name, storeId: res.storeId, role: res.role, pin: res.pin));
                           }

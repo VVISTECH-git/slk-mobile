@@ -62,7 +62,7 @@ class AuthController extends Notifier<AuthState> {
     final data = await _api.post('/auth/login', body: {
       'staffId': staffId,
       'pin': pin,
-      if (storeId != null) 'storeId': storeId,
+      'storeId': ?storeId,
     });
     final map = (data as Map).cast<String, dynamic>();
     final token = map['token'] as String;

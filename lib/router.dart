@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import 'features/auth/auth_controller.dart';
 import 'features/auth/login_screen.dart';
-import 'features/home/home_screen.dart';
 import 'features/invoices/invoice_screen.dart';
 import 'features/pos/checkout_screen.dart';
 import 'features/pos/pos_screen.dart';

@@ -70,7 +70,7 @@ Future<Uint8List> buildChallanPdf(Map<String, dynamic> order) async {
           ],
         ),
         pw.SizedBox(height: 16),
-        pw.Table.fromTextArray(
+        pw.TableHelper.fromTextArray(
           headers: ['#', 'Tag code', 'Size', 'Status'],
           cellStyle: const pw.TextStyle(fontSize: 10),
           headerStyle: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),

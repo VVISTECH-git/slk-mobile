@@ -97,7 +97,7 @@ class PosRepository {
       'paymentMode': paymentMode,
       'discount': discount,
       'channel': channel,
-      if (customer != null) 'customer': customer,
+      'customer': ?customer,
       if (note != null && note.isNotEmpty) 'note': note,
     });
     final map = (data as Map).cast<String, dynamic>();

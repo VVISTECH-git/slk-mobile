@@ -55,9 +55,9 @@ class ProductionRepository {
   }) async {
     final data = await ref.read(apiClientProvider).post('/production/batches', body: {
       'material': material,
-      if (lengthMeters != null) 'lengthMeters': lengthMeters,
+      'lengthMeters': ?lengthMeters,
       if (supplier != null && supplier.isNotEmpty) 'supplier': supplier,
-      if (cost != null) 'cost': cost,
+      'cost': ?cost,
       if (note != null && note.isNotEmpty) 'note': note,
     });
     return (data as Map).cast<String, dynamic>();
@@ -107,7 +107,7 @@ class ProductionRepository {
     final data = await ref.read(apiClientProvider).post('/production/finish', body: {
       'tagCodes': tagCodes,
       'variantId': variantId,
-      if (unitCost != null) 'unitCost': unitCost,
+      'unitCost': ?unitCost,
     });
     return (data as Map).cast<String, dynamic>();
   }
@@ -126,7 +126,7 @@ class ProductionRepository {
 
   Future<void> saveVendor({String? id, required String name, String? phone, String? address}) async {
     final api = ref.read(apiClientProvider);
-    final body = {'name': name, if (phone != null) 'phone': phone, if (address != null) 'address': address};
+    final body = {'name': name, 'phone': ?phone, 'address': ?address};
     if (id == null) {
       await api.post('/production/vendors', body: body);
     } else {

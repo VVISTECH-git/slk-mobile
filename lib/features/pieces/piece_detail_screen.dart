@@ -316,6 +316,12 @@ class _PieceDetailScreenState extends ConsumerState<PieceDetailScreen> {
         data: code,
         version: QrVersions.auto,
         gapless: false,
+        // This paints a standalone PNG for sharing, not a widget in a tree —
+        // there is no container to inherit a background from, so the
+        // deprecation's suggested alternative doesn't apply. Without this,
+        // the exported image is transparent and unreadable over a dark chat
+        // background.
+        // ignore: deprecated_member_use
         emptyColor: Colors.white,
       );
       final bytes = await painter.toImageData(720);
