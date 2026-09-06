@@ -120,11 +120,20 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
                   keyboardType: TextInputType.number,
                   textInputAction: TextInputAction.search,
                   onSubmitted: _lookup,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Item or product code',
                     hintText: '500066 or 300032',
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                     isDense: true,
+                    // iOS's numeric keypad has no return/search key, so typing
+                    // a code by hand has no way to submit without this — the
+                    // Bluetooth scanner's Enter keystroke reaches onSubmitted
+                    // regardless of what the on-screen keyboard shows.
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.arrow_forward),
+                      tooltip: 'Search',
+                      onPressed: _busy ? null : () => _lookup(_field.text),
+                    ),
                   ),
                 ),
               ),

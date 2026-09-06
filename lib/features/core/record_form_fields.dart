@@ -84,6 +84,22 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
       fieldErrors = {...fieldErrors}
         ..remove('productType')
         ..remove('homeProductType');
+
+      // A saree is judged on Body, Pallu, Border and Blouse — wanted by
+      // default rather than four boxes somebody has to remember to tick.
+      //
+      // Only when nothing is chosen yet: this mixin is shared with the edit
+      // screen, where Product Type is re-confirmed (not just changed) every
+      // time somebody opens the picker and taps Done — even without picking
+      // anything new. Applying the default unconditionally there would wipe
+      // an already-photographed slot outside these four, or silently restore
+      // one somebody had deliberately unticked.
+      if (key == 'productType' && chosen?.label == 'Saree' && imageSlots.isEmpty) {
+        imageSlots = [
+          for (final s in o['image_slot'] ?? const <CoreOption>[])
+            if (s.parentId == v) s.id,
+        ];
+      }
     });
   }
 
