@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api_client.dart';
 import '../../models/core.dart';
 import '../../theme/app_theme.dart';
+import '../pieces/piece_labels_pdf.dart';
 import '../pos/barcode_scan_screen.dart';
 import 'core_auth.dart';
 
@@ -100,6 +101,15 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
     if (code != null) await _lookup(code);
   }
 
+  /// One sheet, whether the scan resolved a single saree or a whole
+  /// consignment — a box of ten arriving is exactly when a dozen labels are
+  /// wanted at once, not one screen visit per piece.
+  Future<void> _printLabels(List<CorePiece> pieces) => printPieceLabels(
+        codes: [for (final p in pieces) p.itemCode],
+        productName: pieces.first.name,
+        variantLabel: pieces.first.colour,
+      );
+
   @override
   Widget build(BuildContext context) {
     final p = context.p;
@@ -164,7 +174,18 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
             _Problem(code: _asked ?? '', message: _problem!)
           else if (_found != null) ...[
             _Summary(code: _asked ?? '', pieces: _found!),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () => _printLabels(_found!),
+                icon: const Icon(Icons.qr_code_2, size: 18),
+                label: Text(
+                  _found!.length > 1 ? 'Print labels' : 'Print label',
+                ),
+              ),
+            ),
+            const SizedBox(height: 2),
             for (final piece in _found!) _PieceCard(piece: piece),
           ] else
             const _Idle(),

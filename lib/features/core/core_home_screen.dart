@@ -107,6 +107,12 @@ const _modules = [
     Icons.photo_camera_outlined,
     '/core/photographs',
   ),
+  _Module(
+    'Picking',
+    'Pack an order that is waiting',
+    Icons.local_shipping_outlined,
+    '/core/picking',
+  ),
 ];
 
 class _Tile extends StatelessWidget {

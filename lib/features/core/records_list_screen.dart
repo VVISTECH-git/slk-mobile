@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/api_client.dart';
 import '../../models/core.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/async_view.dart';
+import '../pos/barcode_scan_screen.dart';
 import 'core_auth.dart';
 
 /// The whole catalogue, fetched once per visit.
@@ -34,6 +36,27 @@ final coreRecordsProvider =
   ];
 });
 
+/// Which row a scanned piece belongs to, if the catalogue's own idea of
+/// "the newest consignment" happens to be the one on the label.
+///
+/// A row only remembers its newest product code — see [CoreRecordRow] —
+/// so a piece from an older consignment of the same colourway won't match
+/// here even though it is, in fact, that row's. That's a known, accepted
+/// gap: it fails safe into [fallbackSearchFor] rather than guessing.
+CoreRecordRow? matchingRowForPiece(List<CoreRecordRow> rows, CorePiece piece) {
+  for (final r in rows) {
+    if (r.productCode != null && r.productCode == piece.productCode) {
+      return r;
+    }
+  }
+  return null;
+}
+
+/// What to search for when a scan resolved a piece but not to a specific
+/// row — the product code if the piece has one (300001 and up, on every
+/// piece that arrived in a consignment), the design code otherwise.
+String fallbackSearchFor(CorePiece piece) => piece.productCode ?? piece.designCode;
+
 /// The catalogue, on a phone.
 ///
 /// One row per colourway — the sellable line — which is the same grain the web
@@ -53,11 +76,64 @@ class RecordsListScreen extends ConsumerStatefulWidget {
 class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
   final _search = TextEditingController();
   String _query = '';
+  bool _resolving = false;
 
   @override
   void dispose() {
     _search.dispose();
     super.dispose();
+  }
+
+  /// A scanned label names a piece, not a row — the item code on it (500001
+  /// and up) appears nowhere in [CoreRecordRow.haystack], only the product
+  /// code does. So a scan resolves through the same piece lookup Stock
+  /// Records uses, then either jumps straight to the row that consignment
+  /// belongs to, or — when the row list doesn't have that exact consignment
+  /// as its newest one — falls back to searching by the code the scan
+  /// actually found, rather than silently landing on "nothing matches".
+  Future<void> _scan() async {
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => const BarcodeScanScreen(title: 'Scan an SLK label'),
+      ),
+    );
+    if (code == null || !mounted) return;
+
+    setState(() => _resolving = true);
+    try {
+      final data = await ref.read(coreApiProvider).get('/pieces/$code');
+      final pieces = [
+        for (final row in (data as List))
+          CorePiece.fromJson((row as Map).cast<String, dynamic>()),
+      ];
+
+      if (pieces.isEmpty) {
+        if (mounted) showOk(context, 'Nothing on file for $code.');
+        return;
+      }
+
+      final piece = pieces.first;
+      final rows = await ref.read(coreRecordsProvider.future);
+      final match = matchingRowForPiece(rows, piece);
+
+      if (!mounted) return;
+
+      if (match != null) {
+        context.push('/core/records/${match.id}');
+      } else {
+        final fallback = fallbackSearchFor(piece);
+        setState(() {
+          _search.text = fallback;
+          _query = fallback.toLowerCase();
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) showError(context, e);
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _resolving = false);
+    }
   }
 
   @override
@@ -70,6 +146,20 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
       appBar: AppBar(
         title: const Text('Products List'),
         actions: [
+          _resolving
+              ? const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              : IconButton(
+                  tooltip: 'Scan an SLK label',
+                  icon: const Icon(Icons.qr_code_scanner),
+                  onPressed: _scan,
+                ),
           IconButton(
             tooltip: 'New record',
             icon: const Icon(Icons.add),

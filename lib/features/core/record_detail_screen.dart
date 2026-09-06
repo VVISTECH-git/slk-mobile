@@ -6,6 +6,7 @@ import '../../core/api_client.dart';
 import '../../models/core.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/async_view.dart';
+import '../../widgets/picker_field.dart';
 import 'core_auth.dart';
 import 'new_record_screen.dart';
 import 'record_fields.dart';
@@ -208,15 +209,36 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
     );
   }
 
+  /// Archive, or — for an owner — delete outright. The dialog does its own
+  /// talking to the API and hands back the server's own sentence on success;
+  /// this only has to act on it. Shown before popping so the same
+  /// ScaffoldMessenger carries it over onto the list the record vanished
+  /// from — staying here to read it makes no sense once it's gone or
+  /// inactive.
+  Future<void> _archive() async {
+    final canDelete = ref.read(coreAuthProvider).actor?.role == 'owner';
+
+    final message = await showDialog<String>(
+      context: context,
+      builder: (_) =>
+          _ArchiveDialog(recordId: widget.recordId, canDelete: canDelete),
+    );
+
+    if (message == null || !mounted) return;
+    showOk(context, message);
+    Navigator.of(context).pop();
+  }
+
   // ── Building ──────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final options = ref.watch(coreOptionsProvider);
+    final locations = ref.watch(coreLocationsProvider);
     final actor = ref.watch(coreAuthProvider).actor;
 
     return DefaultTabController(
-      length: 6,
+      length: 7,
       child: Scaffold(
         backgroundColor: context.p.surface1,
         appBar: AppBar(
@@ -232,6 +254,18 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
               icon: const Icon(Icons.photo_camera_outlined),
               onPressed: _current == null ? null : _openPhotos,
             ),
+            // Desk work, by this app's own reasoning (see core_home_screen's
+            // doc comment) — shown at all only to office and owner, the same
+            // way the web's "Delete instead" only appears for an owner. The
+            // real gate is the server's guard("office")/guard("owner");
+            // hiding the icon here is a courtesy, not the enforcement.
+            if (actor != null &&
+                (actor.role == 'office' || actor.role == 'owner'))
+              IconButton(
+                tooltip: 'Archive or delete',
+                icon: const Icon(Icons.archive_outlined),
+                onPressed: _current == null ? null : _archive,
+              ),
           ],
           bottom: TabBar(
             labelColor: context.p.onAppBar,
@@ -248,6 +282,7 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
               Tab(text: 'Prices'),
               Tab(text: 'Images'),
               Tab(text: 'Stock'),
+              Tab(text: 'Publish'),
             ],
           ),
         ),
@@ -269,7 +304,7 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
                 );
               }
 
-              return _tabs(opts, snap.data!, actor);
+              return _tabs(opts, snap.data!, actor, locations.value ?? const []);
             },
           ),
         ),
@@ -286,7 +321,12 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
     );
   }
 
-  Widget _tabs(CoreOptions o, CoreRecordDetail record, CoreActor? actor) {
+  Widget _tabs(
+    CoreOptions o,
+    CoreRecordDetail record,
+    CoreActor? actor,
+    List<CoreLocation> locations,
+  ) {
     final industry = labelOf(o, 'industry', attrs['industry']);
     final home = isHomeIndustry(industry);
 
@@ -350,14 +390,19 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
               'un-ticking it here — that would delete the photograph by '
               'implication. Remove one from the Photographs screen instead.',
         ),
-        _stock(record, uom),
+        _stock(record, uom, locations),
+        _publish(record, actor),
       ],
     );
   }
 
   // ── Stock ─────────────────────────────────────────────────────────────────
 
-  Widget _stock(CoreRecordDetail record, String? uom) {
+  Widget _stock(
+    CoreRecordDetail record,
+    String? uom,
+    List<CoreLocation> locations,
+  ) {
     final unit = record.isSerialised ? 'pieces' : 'units';
     final stock = record.stock;
 
@@ -387,6 +432,29 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
           RecordNote('Nothing on hand.')
         else
           _LocationTable(rows: stock.byLocation, unit: unit),
+
+        const RecordSectionHeading('Record a movement'),
+        Text(
+          'Received, returned, sold, damaged or transferred — one line added '
+          'to the ledger, never a total overwritten.',
+          style: TextStyle(fontSize: 12, color: context.p.textSecondary),
+        ),
+        const SizedBox(height: 8),
+        _RecordMovementForm(
+          recordId: widget.recordId,
+          stock: stock,
+          locations: locations,
+          uom: uom,
+          onRecorded: (message) {
+            showOk(context, message);
+            setState(() => _record = _load());
+          },
+        ),
+
+        if (record.movements.isNotEmpty) ...[
+          const RecordSectionHeading('Recent movements'),
+          for (final m in record.movements) _MovementCard(m),
+        ],
 
         const RecordSectionHeading('Consignments received'),
         Text(
@@ -430,6 +498,57 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
             ),
           ),
         ),
+      ],
+    );
+  }
+
+  // ── Publish ───────────────────────────────────────────────────────────────
+
+  Widget _publish(CoreRecordDetail record, CoreActor? actor) {
+    final canPublish =
+        actor != null && (actor.role == 'office' || actor.role == 'owner');
+
+    final checklist = <(String, bool)>[
+      ('Retail price set', prices['retail']!.text.trim().isNotEmpty),
+      ('At least one photograph', record.images.any((i) => i.url != null)),
+      ('Colour set', colourId != null),
+      ('Fibre type set', attrs['fibreType'] != null),
+      ('Craft technique set', attrs['craftTechnique'] != null),
+    ];
+
+    return RecordTabBody(
+      children: [
+        const RecordSectionHeading('Ready to be seen?'),
+        Text(
+          'Publishing still works either way — a listing missing these just '
+          'says less than it could.',
+          style: TextStyle(fontSize: 12, color: context.p.textSecondary),
+        ),
+        const SizedBox(height: 8),
+        for (final item in checklist) _ChecklistRow(item.$1, item.$2),
+
+        if (!canPublish) ...[
+          const SizedBox(height: 8),
+          RecordNote(
+            'Publishing is office and above. What follows is here to see, '
+            "not to use — ask whoever holds that role on this account.",
+          ),
+        ],
+
+        const RecordSectionHeading('Consignments'),
+        if (record.consignments.isEmpty)
+          RecordNote(
+            'Nothing recorded as received yet — nothing to publish until '
+            'something has.',
+          )
+        else
+          for (final c in record.consignments)
+            _PublishConsignmentPanel(
+              recordId: widget.recordId,
+              consignment: c,
+              canPublish: canPublish,
+              onChanged: () => setState(() => _record = _load()),
+            ),
       ],
     );
   }
@@ -659,6 +778,430 @@ class _ConsignmentCard extends StatelessWidget {
   }
 }
 
+/// One line of the ledger — the vocabulary from the web's `MOVEMENT_KINDS`,
+/// kept here as plain data rather than a network round trip to read a
+/// constant.
+const _movementKinds = [
+  (key: 'received', label: 'Received', dir: 'in'),
+  (key: 'returned', label: 'Returned', dir: 'in'),
+  (key: 'sold', label: 'Sold', dir: 'out'),
+  (key: 'damaged', label: 'Damaged', dir: 'out'),
+  (key: 'transferred', label: 'Transferred', dir: 'out'),
+];
+
+String movementDirOf(String kind) =>
+    _movementKinds.firstWhere((k) => k.key == kind, orElse: () => _movementKinds.first).dir;
+
+/// Locations to offer for the "from"/"location" field, given the movement's
+/// direction.
+///
+/// Unfiltered for an "in" movement — stock can land anywhere internal. For
+/// an "out" movement, narrowed to locations the ledger summary says
+/// currently hold something, the same UX assistance the web gives (the
+/// authoritative check stays server-side in `recordMovement`). Never left
+/// with nothing to choose from: a summary that disagrees with reality —
+/// stale, or a location just added — falls back to the full internal list
+/// rather than locking the field.
+List<CoreLocation> movementLocationOptions({
+  required String kind,
+  required List<CoreLocation> internal,
+  required List<CoreStockAtLocation> byLocation,
+}) {
+  if (movementDirOf(kind) == 'in') return internal;
+
+  final holding = {for (final s in byLocation) if (s.qty > 0) s.location};
+  final narrowed = [for (final l in internal) if (holding.contains(l.name)) l];
+  return narrowed.isEmpty ? internal : narrowed;
+}
+
+/// Received, returned, sold, damaged or transferred — one append to the
+/// ledger. Never a total overwritten, which is the whole reason this is a
+/// form and not a number somebody edits.
+class _RecordMovementForm extends ConsumerStatefulWidget {
+  const _RecordMovementForm({
+    required this.recordId,
+    required this.stock,
+    required this.locations,
+    required this.uom,
+    required this.onRecorded,
+  });
+
+  final String recordId;
+  final CoreStock stock;
+  final List<CoreLocation> locations;
+  final String? uom;
+
+  /// Called with the server's own sentence describing what happened —
+  /// "Received 12 into Warehouse", not a generic "Saved."
+  final void Function(String message) onRecorded;
+
+  @override
+  ConsumerState<_RecordMovementForm> createState() =>
+      _RecordMovementFormState();
+}
+
+class _RecordMovementFormState extends ConsumerState<_RecordMovementForm> {
+  String _kind = 'received';
+  String? _locationId;
+  String? _toLocationId;
+  final _qty = TextEditingController();
+  final _reference = TextEditingController();
+  final _note = TextEditingController();
+
+  bool _busy = false;
+  String? _error;
+
+  /// Kept across retries of the same attempt, the same way a new record's
+  /// save key is — cleared only once the server has actually recorded it, so
+  /// a dropped connection followed by pressing Record again is recognised as
+  /// the same intent rather than becoming a second line in the ledger.
+  String? _key;
+
+  @override
+  void dispose() {
+    _qty.dispose();
+    _reference.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  List<CoreLocation> get _internal =>
+      [for (final l in widget.locations) if (l.isInternal) l];
+
+  /// Narrowed to where this design currently holds stock, for an "out"
+  /// movement — the same UX assistance the web gives, not the authoritative
+  /// check, which stays server-side. Falls back to every internal location
+  /// rather than leaving the field with nothing to choose, since the ledger
+  /// summary and this list can disagree in ways worth letting through rather
+  /// than silently hiding (a location added since the summary was fetched,
+  /// for one).
+  List<CoreLocation> get _fromOptions => movementLocationOptions(
+        kind: _kind,
+        internal: _internal,
+        byLocation: widget.stock.byLocation,
+      );
+
+  List<CoreLocation> get _toOptions =>
+      [for (final l in _internal) if (l.id != _locationId) l];
+
+  Future<void> _submit() async {
+    if (_locationId == null) {
+      setState(() => _error = 'Choose a location.');
+      return;
+    }
+    if (_kind == 'transferred' && _toLocationId == null) {
+      setState(() => _error = 'Choose where it is going.');
+      return;
+    }
+    final qty = _qty.text.trim();
+    if (qty.isEmpty) {
+      setState(() => _error = 'How many? It has to be a number above zero.');
+      return;
+    }
+
+    final key = _key ??= idempotencyKey();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      final data = await ref.read(coreApiProvider).post(
+        '/records/${widget.recordId}/movements',
+        headers: {'Idempotency-Key': key},
+        body: {
+          'kind': _kind,
+          'locationId': _locationId,
+          if (_kind == 'transferred') 'toLocationId': _toLocationId,
+          'qty': qty,
+          'reference': _reference.text.trim(),
+          'note': _note.text.trim(),
+        },
+      );
+
+      _key = null;
+      _qty.clear();
+      _reference.clear();
+      _note.clear();
+      if (mounted) {
+        setState(() {
+          _locationId = null;
+          _toLocationId = null;
+        });
+      }
+
+      final message = (data as Map)['message'] as String? ?? 'Recorded.';
+      widget.onRecorded(message);
+    } on ApiException catch (e) {
+      setState(() => _error = e.message);
+    } catch (e) {
+      setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final isTransfer = _kind == 'transferred';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final k in _movementKinds)
+              ChoiceChip(
+                label: Text(k.label),
+                selected: _kind == k.key,
+                onSelected: (_) => setState(() {
+                  _kind = k.key;
+                  _locationId = null;
+                  _toLocationId = null;
+                }),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        RecordFieldWrap(
+          child: PickerField(
+            label: isTransfer ? 'From' : 'Location',
+            value: _locationId,
+            options: [
+              for (final l in _fromOptions) PickerOption(l.id, l.name),
+            ],
+            onChanged: (v) => setState(() {
+              _locationId = v;
+              if (_toLocationId == v) _toLocationId = null;
+            }),
+          ),
+        ),
+        if (isTransfer)
+          RecordFieldWrap(
+            child: PickerField(
+              label: 'To',
+              value: _toLocationId,
+              hint: _locationId == null ? 'Choose From first' : 'Select',
+              options: [for (final l in _toOptions) PickerOption(l.id, l.name)],
+              onChanged: (v) => setState(() => _toLocationId = v),
+            ),
+          ),
+        RecordFieldWrap(
+          child: TextField(
+            controller: _qty,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: InputDecoration(
+              labelText: widget.uom == null ? 'How many' : 'How many (${widget.uom})',
+              border: const OutlineInputBorder(),
+            ),
+          ),
+        ),
+        RecordFieldWrap(
+          child: TextField(
+            controller: _reference,
+            decoration: const InputDecoration(
+              labelText: 'Reference',
+              hintText: 'Invoice or challan number',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+        RecordFieldWrap(
+          child: TextField(
+            controller: _note,
+            decoration: const InputDecoration(
+              labelText: 'Note',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(_error!, style: TextStyle(fontSize: 12, color: p.danger)),
+          ),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: _busy ? null : _submit,
+            child: _busy
+                ? const SizedBox(
+                    height: 18,
+                    width: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Record'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MovementCard extends StatelessWidget {
+  const _MovementCard(this.movement);
+
+  final CoreMovement movement;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final kindLabel = _movementKinds
+        .firstWhere(
+          (k) => k.key == movement.kind,
+          orElse: () => (key: movement.kind, label: movement.kind, dir: 'in'),
+        )
+        .label;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: p.surface2,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: p.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                kindLabel,
+                style: TextStyle(fontWeight: FontWeight.w700, color: p.text),
+              ),
+              const Spacer(),
+              Text(
+                '${movement.qty}',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            [
+              if (movement.from != null && movement.to != null)
+                '${movement.from} → ${movement.to}'
+              else if (movement.to != null)
+                'into ${movement.to}'
+              else if (movement.from != null)
+                'out of ${movement.from}',
+              movement.occurredAt,
+              if (movement.reason != null) movement.reason!,
+            ].whereType<String>().join(' · '),
+            style: TextStyle(fontSize: 11.5, color: p.textMuted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Archive, or — one step further, for an owner — delete outright.
+///
+/// One dialog for both, escalating rather than offering two entry points:
+/// "Delete instead" only appears at all once you can do it, and choosing it
+/// swaps the whole dialog to a stronger warning instead of opening a second
+/// one. A dialog is not a permission — the server's `guard` decides what
+/// actually happens; this only decides what somebody has to click through
+/// first.
+class _ArchiveDialog extends ConsumerStatefulWidget {
+  const _ArchiveDialog({required this.recordId, required this.canDelete});
+
+  final String recordId;
+  final bool canDelete;
+
+  @override
+  ConsumerState<_ArchiveDialog> createState() => _ArchiveDialogState();
+}
+
+class _ArchiveDialogState extends ConsumerState<_ArchiveDialog> {
+  bool _confirmingDelete = false;
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _run(Future<dynamic> Function(ApiClient api) call) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final data = await call(ref.read(coreApiProvider));
+      final message = (data as Map)['message'] as String? ?? 'Done.';
+      if (mounted) Navigator.of(context).pop(message);
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+
+    return AlertDialog(
+      title: Text(_confirmingDelete ? 'Delete this record?' : 'Archive this record?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _confirmingDelete
+                ? 'This cannot be undone, and the stock history goes with '
+                    'it — every movement, piece and photograph this colour '
+                    'has.'
+                : 'Taken out of the active catalogue. Its stock history is '
+                    'kept, and this can be undone on the web.',
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(_error!, style: TextStyle(color: p.danger, fontSize: 12.5)),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        if (widget.canDelete && !_confirmingDelete)
+          TextButton(
+            onPressed:
+                _busy ? null : () => setState(() => _confirmingDelete = true),
+            child: Text('Delete instead', style: TextStyle(color: p.danger)),
+          ),
+        FilledButton(
+          style: _confirmingDelete
+              ? FilledButton.styleFrom(backgroundColor: p.danger)
+              : null,
+          onPressed: _busy
+              ? null
+              : () => _confirmingDelete
+                  ? _run((api) => api.delete('/records/${widget.recordId}'))
+                  : _run((api) => api.post('/records/${widget.recordId}/archive')),
+          child: _busy
+              ? const SizedBox(
+                  height: 16,
+                  width: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(_confirmingDelete ? 'Delete' : 'Archive'),
+        ),
+      ],
+    );
+  }
+}
+
 class _Retry extends StatelessWidget {
   const _Retry({required this.message, required this.onRetry});
 
@@ -683,4 +1226,292 @@ class _Retry extends StatelessWidget {
           ),
         ),
       );
+}
+
+class _ChecklistRow extends StatelessWidget {
+  const _ChecklistRow(this.label, this.done);
+
+  final String label;
+  final bool done;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Icon(
+            done ? Icons.check_circle : Icons.radio_button_unchecked,
+            size: 18,
+            color: done ? p.success : p.textMuted,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              color: done ? p.text : p.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One consignment's place on every channel this business sells through,
+/// and the listing wording it can override. Every channel is always shown,
+/// published or not — "which channels exist" is simply every row of the
+/// channel table, the same as the web.
+class _PublishConsignmentPanel extends ConsumerStatefulWidget {
+  const _PublishConsignmentPanel({
+    required this.recordId,
+    required this.consignment,
+    required this.canPublish,
+    required this.onChanged,
+  });
+
+  final String recordId;
+  final CoreConsignment consignment;
+  final bool canPublish;
+  final VoidCallback onChanged;
+
+  @override
+  ConsumerState<_PublishConsignmentPanel> createState() =>
+      _PublishConsignmentPanelState();
+}
+
+class _PublishConsignmentPanelState
+    extends ConsumerState<_PublishConsignmentPanel> {
+  late final _title = TextEditingController(text: widget.consignment.title ?? '');
+  late final _description =
+      TextEditingController(text: widget.consignment.description ?? '');
+  late final _weight = TextEditingController(
+    text: widget.consignment.weightGrams?.toString() ?? '',
+  );
+  late final _hsn = TextEditingController(text: widget.consignment.hsnCode ?? '');
+
+  /// Which channel is mid-publish, if any — so one button shows its own
+  /// spinner rather than every button on the panel freezing for a request
+  /// that only concerns one of them.
+  String? _publishing;
+  bool _savingListing = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _description.dispose();
+    _weight.dispose();
+    _hsn.dispose();
+    super.dispose();
+  }
+
+  Future<void> _publish(String channelCode) async {
+    setState(() {
+      _publishing = channelCode;
+      _error = null;
+    });
+    try {
+      final data = await ref.read(coreApiProvider).post(
+        '/records/${widget.recordId}/consignments/${widget.consignment.id}/publish',
+        body: {'channelCode': channelCode},
+      );
+      final message = (data as Map)['message'] as String? ?? 'Published.';
+      if (mounted) {
+        showOk(context, message);
+        widget.onChanged();
+      }
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _publishing = null);
+    }
+  }
+
+  Future<void> _saveListing() async {
+    setState(() {
+      _savingListing = true;
+      _error = null;
+    });
+    try {
+      final weight = _weight.text.trim();
+      await ref.read(coreApiProvider).patch(
+        '/records/${widget.recordId}/consignments/${widget.consignment.id}/listing',
+        body: {
+          'title': _title.text.trim().isEmpty ? null : _title.text.trim(),
+          'description':
+              _description.text.trim().isEmpty ? null : _description.text.trim(),
+          'weightGrams': weight.isEmpty ? null : int.tryParse(weight),
+          'hsnCode': _hsn.text.trim().isEmpty ? null : _hsn.text.trim(),
+        },
+      );
+      if (mounted) {
+        showOk(context, 'Listing saved.');
+        widget.onChanged();
+      }
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _savingListing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final c = widget.consignment;
+    final disabled = !widget.canPublish;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: p.surface2,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: p.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                c.code,
+                style: TextStyle(fontWeight: FontWeight.w700, color: p.primary),
+              ),
+              const Spacer(),
+              Text(
+                '${c.qty} · ${c.location ?? "gone"}',
+                style: TextStyle(fontSize: 12, color: p.textSecondary),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          for (final ch in c.channels)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  Icon(
+                    ch.isPublished ? Icons.check_circle : Icons.circle_outlined,
+                    size: 16,
+                    color: ch.isPublished ? p.success : p.textMuted,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      ch.name,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: ch.isPublished ? p.text : p.textSecondary,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    height: 32,
+                    child: OutlinedButton(
+                      onPressed: disabled || _publishing != null
+                          ? null
+                          : () => _publish(ch.code),
+                      child: _publishing == ch.code
+                          ? const SizedBox(
+                              height: 14,
+                              width: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Text(ch.isPublished ? 'Republish' : 'Publish'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 8),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: Text(
+              'Listing overrides',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: p.text,
+              ),
+            ),
+            children: [
+              RecordFieldWrap(
+                child: TextField(
+                  controller: _title,
+                  enabled: !disabled,
+                  decoration: const InputDecoration(
+                    labelText: 'Title',
+                    hintText: 'Blank composes it from the design',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              RecordFieldWrap(
+                child: TextField(
+                  controller: _description,
+                  enabled: !disabled,
+                  minLines: 2,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Description',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              RecordFieldWrap(
+                child: TextField(
+                  controller: _weight,
+                  enabled: !disabled,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: 'Weight (grams)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              RecordFieldWrap(
+                child: TextField(
+                  controller: _hsn,
+                  enabled: !disabled,
+                  decoration: const InputDecoration(
+                    labelText: 'HSN code',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: disabled || _savingListing ? null : _saveListing,
+                  child: _savingListing
+                      ? const SizedBox(
+                          height: 16,
+                          width: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Save listing'),
+                ),
+              ),
+            ],
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_error!, style: TextStyle(fontSize: 12, color: p.danger)),
+            ),
+        ],
+      ),
+    );
+  }
 }

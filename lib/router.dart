@@ -18,6 +18,7 @@ import 'features/core/core_home_screen.dart';
 import 'features/core/core_sign_in_screen.dart';
 import 'features/core/new_record_screen.dart';
 import 'features/core/photographs_screen.dart';
+import 'features/core/picking_screen.dart';
 import 'features/core/records_list_screen.dart';
 import 'features/core/record_detail_screen.dart';
 import 'features/core/record_photos_screen.dart';
@@ -168,6 +169,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/core/photographs',
         builder: (_, _) => const PhotographsScreen(),
       ),
+
+      // An order Shopify has already reserved, waiting to actually leave —
+      // packing writes the movement; reserving never does.
+      GoRoute(path: '/core/picking', builder: (_, _) => const PickingScreen()),
 
       // POS + invoices — live.
       GoRoute(path: '/pos', builder: (_, _) => const PosScreen()),

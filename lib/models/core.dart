@@ -368,6 +368,75 @@ class CoreLocation {
       );
 }
 
+/// An internal location that currently holds stock of a reservation's
+/// colourway, and how much — precomputed server-side so packing doesn't need
+/// a second request to ask where.
+class CoreHoldingLocation {
+  const CoreHoldingLocation({
+    required this.id,
+    required this.name,
+    required this.qty,
+  });
+
+  final String id;
+  final String name;
+  final int qty;
+
+  factory CoreHoldingLocation.fromJson(Map<String, dynamic> json) =>
+      CoreHoldingLocation(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        qty: _intOf(json['qty']) ?? 0,
+      );
+}
+
+/// An order Shopify has already reserved but nobody has packed yet.
+///
+/// Reserving and packing are different acts, deliberately: nothing physical
+/// happens when an order arrives, so nothing is written to the ledger until
+/// somebody here says the piece has actually left.
+class CoreReservation {
+  const CoreReservation({
+    required this.id,
+    required this.channelName,
+    required this.productCode,
+    required this.designName,
+    required this.qty,
+    required this.createdAt,
+    required this.holding,
+    this.colour,
+    this.externalOrderName,
+  });
+
+  final String id;
+  final String channelName;
+  final String productCode;
+  final String designName;
+  final String? colour;
+  final int qty;
+
+  /// For a human reading the list — never used as a key.
+  final String? externalOrderName;
+  final String createdAt;
+  final List<CoreHoldingLocation> holding;
+
+  factory CoreReservation.fromJson(Map<String, dynamic> json) =>
+      CoreReservation(
+        id: json['id'] as String,
+        channelName: json['channelName'] as String? ?? '',
+        productCode: json['productCode'] as String? ?? '',
+        designName: json['designName'] as String? ?? '',
+        colour: json['colour'] as String?,
+        qty: _intOf(json['qty']) ?? 0,
+        externalOrderName: json['externalOrderName'] as String?,
+        createdAt: json['createdAt'] as String? ?? '',
+        holding: [
+          for (final h in (json['holding'] as List? ?? const []))
+            CoreHoldingLocation.fromJson((h as Map).cast<String, dynamic>()),
+        ],
+      );
+}
+
 /// A record, whole — everything the editor needs, ported field for field from
 /// `RecordDetail` on the server rather than trimmed to a subset.
 ///
@@ -396,6 +465,7 @@ class CoreRecordDetail {
     required this.consignments,
     required this.images,
     required this.descriptors,
+    required this.movements,
   });
 
   final String id;
@@ -439,6 +509,10 @@ class CoreRecordDetail {
   /// The adjectives on the design, as lookup value ids.
   final List<String> descriptors;
 
+  /// The last few ledger events, newest first — the same rows Record A
+  /// Movement writes, read back.
+  final List<CoreMovement> movements;
+
   factory CoreRecordDetail.fromJson(Map<String, dynamic> json) =>
       CoreRecordDetail(
         id: json['id'] as String,
@@ -477,6 +551,51 @@ class CoreRecordDetail {
         descriptors: [
           for (final d in (json['descriptors'] as List? ?? const [])) '$d',
         ],
+        movements: [
+          for (final m in (json['movements'] as List? ?? const []))
+            CoreMovement.fromJson((m as Map).cast<String, dynamic>()),
+        ],
+      );
+}
+
+/// One line of the ledger — always positive, always between two places (or
+/// one, when the other end is outside the business: Production, Customer,
+/// Scrap). See `MOVEMENT_KINDS` on the web for the fixed vocabulary of
+/// `kind`: received, returned, sold, damaged, transferred.
+class CoreMovement {
+  const CoreMovement({
+    required this.id,
+    required this.kind,
+    required this.qty,
+    required this.occurredAt,
+    this.reason,
+    this.from,
+    this.to,
+  });
+
+  final int id;
+  final String kind;
+  final int qty;
+
+  /// Already formatted by the server ("05 Sep 2026") — displayed as-is.
+  final String occurredAt;
+
+  /// Set on some movements (adjustments, order sync) and not others: Record A
+  /// Movement's own form writes a reference and a note instead, which this
+  /// endpoint does not currently echo back. Null here is common, not missing.
+  final String? reason;
+
+  final String? from;
+  final String? to;
+
+  factory CoreMovement.fromJson(Map<String, dynamic> json) => CoreMovement(
+        id: _intOf(json['id']) ?? 0,
+        kind: json['kind'] as String? ?? '',
+        qty: _intOf(json['qty']) ?? 0,
+        occurredAt: json['occurredAt'] as String? ?? '',
+        reason: json['reason'] as String?,
+        from: json['from'] as String?,
+        to: json['to'] as String?,
       );
 }
 
@@ -549,6 +668,11 @@ class CoreConsignment {
     this.reference,
     this.note,
     required this.items,
+    this.title,
+    this.description,
+    this.weightGrams,
+    this.hsnCode,
+    required this.channels,
   });
 
   final String id;
@@ -567,6 +691,20 @@ class CoreConsignment {
   /// cloth, which arrives as a quantity rather than as pieces.
   final List<String> items;
 
+  /// What this consignment is listed as, where it differs from the rest of
+  /// the line. Null means "compose it" — see @slk/domain/listing — not
+  /// "unset the same way as an empty string".
+  final String? title;
+  final String? description;
+
+  /// Grams. Null until entered — there is no honest default for a weight.
+  final int? weightGrams;
+  final String? hsnCode;
+
+  /// Every channel this business sells through, and whether this specific
+  /// consignment is listed on it yet.
+  final List<CoreChannel> channels;
+
   factory CoreConsignment.fromJson(Map<String, dynamic> json) =>
       CoreConsignment(
         id: json['id'] as String,
@@ -579,6 +717,39 @@ class CoreConsignment {
         items: [
           for (final i in (json['items'] as List? ?? const [])) '$i',
         ],
+        title: json['title'] as String?,
+        description: json['description'] as String?,
+        weightGrams: _intOf(json['weightGrams']),
+        hsnCode: json['hsnCode'] as String?,
+        channels: [
+          for (final c in (json['channels'] as List? ?? const []))
+            CoreChannel.fromJson((c as Map).cast<String, dynamic>()),
+        ],
+      );
+}
+
+/// One sales channel, and whether this consignment is listed on it yet. A
+/// batch can be on some channels and not others — each is its own decision.
+class CoreChannel {
+  const CoreChannel({
+    required this.code,
+    required this.name,
+    this.shopifyProductId,
+  });
+
+  final String code;
+  final String name;
+
+  /// Null until first published — that, not a separate flag, is "not
+  /// published yet".
+  final String? shopifyProductId;
+
+  bool get isPublished => shopifyProductId != null;
+
+  factory CoreChannel.fromJson(Map<String, dynamic> json) => CoreChannel(
+        code: json['code'] as String,
+        name: json['name'] as String,
+        shopifyProductId: json['shopifyProductId'] as String?,
       );
 }
 
