@@ -68,15 +68,18 @@ workflows:
           failure: true
       # Auto-publish the AAB to Google Play. Requires GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
       # (a Play service-account JSON) in Codemagic env, and one prior MANUAL upload
-      # of this package so the app exists on Play. Change `track` to "production"
-      # only once the store listing + any required closed testing are complete.
+      # of this package so the app exists on Play.
+      #
+      # `track: internal` — this app has stayed Android-internal-only (iOS/
+      # TestFlight is the real public target; see the top of this file). This
+      # was set to "production" despite this very comment saying not to until
+      # the store listing was ready, which is how a stray, never-rolled-out
+      # draft ended up sitting on Production and squatting a version code —
+      # every build auto-published there whether or not that was wanted.
+      # Change back to "production" deliberately, once that's actually true.
       google_play:
         credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
-        track: production
-        # Uploads to Production as a DRAFT — you review + roll out in Play Console.
-        # Requires the app's store listing + all declarations to be complete, or
-        # the publish step fails.
-        submit_as_draft: true
+        track: internal
 
   # =========================================================================
   # iOS — signed IPA → TestFlight (runs on a Mac, so it works from Windows too)
