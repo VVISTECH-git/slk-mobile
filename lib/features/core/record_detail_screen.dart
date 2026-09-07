@@ -50,6 +50,7 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
   /// Blank means "leave the ledger alone" — the same convention the server's
   /// own draft uses, so a correction is only ever a stated intention.
   final _quantity = TextEditingController();
+  final _quantityFocus = FocusNode();
 
   bool _busy = false;
   CoreRecordDetail? _current;
@@ -121,6 +122,7 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
   void dispose() {
     disposeFormFields();
     _quantity.dispose();
+    _quantityFocus.dispose();
     super.dispose();
   }
 
@@ -272,50 +274,67 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
               ),
           ],
           bottom: TabBar(
+            // Seven tabs since Publish joined the other six — the fixed
+            // width that fit six no longer does, so a scroll affordance
+            // beats a clipped label.
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             labelColor: context.p.onAppBar,
             unselectedLabelColor: context.p.onAppBar.withValues(alpha: 0.72),
             indicatorColor: context.p.onAppBar,
-            labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+            labelPadding: const EdgeInsets.symmetric(horizontal: 12),
             labelStyle:
                 const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
             unselectedLabelStyle: const TextStyle(fontSize: 12.5),
-            tabs: const [
-              Tab(text: 'Basic'),
-              Tab(text: 'Craft'),
-              Tab(text: 'Details'),
-              Tab(text: 'Prices'),
-              Tab(text: 'Images'),
-              Tab(text: 'Stock'),
-              Tab(text: 'Publish'),
-            ],
+            tabs: () {
+              final counts = tabErrorCounts(fieldErrors);
+              return [
+                tabWithErrorBadge('Basic', counts[0] ?? 0),
+                tabWithErrorBadge('Craft', counts[1] ?? 0),
+                const Tab(text: 'Details'),
+                tabWithErrorBadge('Prices', counts[3] ?? 0),
+                const Tab(text: 'Images'),
+                tabWithErrorBadge('Stock', counts[5] ?? 0),
+                const Tab(text: 'Publish'),
+              ];
+            }(),
           ),
         ),
-        body: AsyncView<CoreOptions>(
-          value: options,
-          onRetry: () => ref.invalidate(coreOptionsProvider),
-          data: (opts) => FutureBuilder<CoreRecordDetail>(
-            future: _record,
-            builder: (context, snap) {
-              if (snap.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snap.hasError) {
-                return _Retry(
-                  message: '${snap.error}',
-                  onRetry: () => setState(() {
-                    _record = _load();
-                  }),
-                );
-              }
+        // A numeric keypad has no return key of its own to dismiss it with —
+        // tapping anywhere outside the field it belongs to is the fallback
+        // every other kind of field already gets for free.
+        body: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: () => FocusScope.of(context).unfocus(),
+          child: AsyncView<CoreOptions>(
+            value: options,
+            onRetry: () => ref.invalidate(coreOptionsProvider),
+            data: (opts) => FutureBuilder<CoreRecordDetail>(
+              future: _record,
+              builder: (context, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snap.hasError) {
+                  return _Retry(
+                    message: '${snap.error}',
+                    onRetry: () => setState(() {
+                      _record = _load();
+                    }),
+                  );
+                }
 
-              return _tabs(opts, snap.data!, actor, locations.value ?? const []);
-            },
+                return _tabs(
+                    opts, snap.data!, actor, locations.value ?? const []);
+              },
+            ),
           ),
         ),
         bottomNavigationBar: RecordSaveBar(
           busy: _busy,
           errors: fieldErrors,
           label: 'Save changes',
+          focusNodes: {...priceFocusNodes, 'quantity': _quantityFocus},
           onSave: () {
             final opts = options.value;
             if (opts != null) _submit(opts);
@@ -488,9 +507,13 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
           error: fieldErrors['quantity'],
           child: TextField(
             controller: _quantity,
+            focusNode: _quantityFocus,
             enabled: !record.isSerialised,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            onChanged: (_) => setState(
+              () => fieldErrors = {...fieldErrors}..remove('quantity'),
+            ),
             decoration: InputDecoration(
               labelText: uom == null
                   ? 'Quantity on hand'

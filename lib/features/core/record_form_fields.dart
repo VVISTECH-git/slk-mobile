@@ -9,6 +9,32 @@ import '../../widgets/picker_field.dart';
 import 'multi_picker_field.dart';
 import 'record_fields.dart';
 
+/// Which tab a `fieldErrors` key lives on — Basic, Craft, Details, Prices,
+/// Images, Stock, in that order (0-5), the tab order both the create and
+/// edit screens share. A key with no error to show today still gets a slot
+/// here so a future one doesn't silently show on no tab at all.
+///
+/// This is what makes a listed error in [RecordSaveBar] more than a label:
+/// tapping one can jump to where the field actually lives.
+const Map<String, int> fieldErrorTabIndex = {
+  'industry': 0,
+  'productType': 0,
+  'homeProductType': 0,
+  'garmentType': 0,
+  'fibreType': 0,
+  'colour': 1,
+  'craftTechnique': 1,
+  'cost': 3,
+  'making': 3,
+  'wholesale': 3,
+  'retail': 3,
+  'mrp': 3,
+  // Named for what the server's own validation actually keys this error
+  // under (see slk-core's records/actions.ts) — not the field's own local
+  // name, which is what let this key silently never match anything.
+  'openingStock': 5,
+};
+
 /// Every slot Images would offer for a saree — Body, Pallu, Border and
 /// Blouse in the live vocabulary — wanted by default rather than boxes
 /// somebody has to remember to tick.
@@ -56,12 +82,29 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
   final TextEditingController notesField = TextEditingController();
   final TextEditingController nameField = TextEditingController();
 
+  /// One per price field, so a tapped error in [RecordSaveBar] can land the
+  /// cursor on the actual field rather than just the right tab.
+  final Map<String, FocusNode> priceFocusNodes = {
+    for (final p in priceKinds) p.key: FocusNode(),
+  };
+
   bool nameIsCustom = false;
   Map<String, String> fieldErrors = const {};
+
+  /// Called after every change made through this mixin's own field handlers.
+  /// A no-op by default; [NewRecordScreen] overrides it to debounce a save of
+  /// the draft so far. The edit screen leaves it alone — resuming a
+  /// half-finished *edit* would mean silently reverting someone else's more
+  /// recent change with a stale local copy, which a new record has no way to
+  /// even mean.
+  void onFieldChanged() {}
 
   void disposeFormFields() {
     for (final c in prices.values) {
       c.dispose();
+    }
+    for (final f in priceFocusNodes.values) {
+      f.dispose();
     }
     notesField.dispose();
     nameField.dispose();
@@ -93,6 +136,7 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
   void setAttr(String key, String? value) => setState(() {
         attrs[key] = value;
         fieldErrors = {...fieldErrors}..remove(key);
+        onFieldChanged();
       });
 
   /// Choosing a product type also answers how the thing is measured.
@@ -121,6 +165,7 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
       if (key == 'productType' && chosen?.label == 'Saree' && imageSlots.isEmpty && v != null) {
         imageSlots = sareeDefaultImageSlots(o, v);
       }
+      onFieldChanged();
     });
   }
 
@@ -173,6 +218,7 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
               attrs['homeProductType'] = null;
               attrs['garmentType'] = null;
               fieldErrors = {...fieldErrors}..remove('industry');
+              onFieldChanged();
             }),
           ),
         ),
@@ -270,6 +316,7 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
               // may no longer be on the list.
               attrs['textileMaterial'] = null;
               fieldErrors = {...fieldErrors}..remove('fibreType');
+              onFieldChanged();
             }),
           ),
         ),
@@ -321,7 +368,10 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
                 : 'Composed from the taxonomy. Type to override.',
             helperMaxLines: 2,
           ),
-          onChanged: (v) => setState(() => nameIsCustom = v.trim().isNotEmpty),
+          onChanged: (v) => setState(() {
+            nameIsCustom = v.trim().isNotEmpty;
+            onFieldChanged();
+          }),
         ),
 
         ...footer,
@@ -346,6 +396,7 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
             onChanged: (v) => setState(() {
               colourId = v;
               fieldErrors = {...fieldErrors}..remove('colour');
+              onFieldChanged();
             }),
           ),
         ),
@@ -358,7 +409,10 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
             allowClear: true,
             hint: 'None',
             options: pickOptions(o['colour']),
-            onChanged: (v) => setState(() => secondaryColourId = v),
+            onChanged: (v) => setState(() {
+              secondaryColourId = v;
+              onFieldChanged();
+            }),
           ),
         ),
         RecordFieldWrap(
@@ -389,6 +443,7 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
             onChanged: (v) => setState(() {
               attrs['motifCategory'] = v;
               attrs['motif'] = null;
+              onFieldChanged();
             }),
           ),
         ),
@@ -533,7 +588,10 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
           label: 'Descriptor',
           options: o['descriptor'] ?? const [],
           values: descriptors,
-          onChanged: (v) => setState(() => descriptors = v),
+          onChanged: (v) => setState(() {
+            descriptors = v;
+            onFieldChanged();
+          }),
         ),
         const SizedBox(height: 14),
         TextField(
@@ -544,6 +602,7 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
             labelText: 'Notes',
             border: OutlineInputBorder(),
           ),
+          onChanged: (_) => onFieldChanged(),
         ),
       ],
     );
@@ -561,11 +620,20 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
             error: fieldErrors[p.key],
             child: TextField(
               controller: prices[p.key],
+              focusNode: priceFocusNodes[p.key],
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [
                 FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
               ],
+              // A price rejected by the last submit stayed marked red even
+              // after it was corrected — nothing ever told fieldErrors the
+              // field had changed. Every picker field already clears its own
+              // entry the same way; this was the one kind of field that didn't.
+              onChanged: (_) => setState(() {
+                fieldErrors = {...fieldErrors}..remove(p.key);
+                onFieldChanged();
+              }),
               decoration: InputDecoration(
                 // "per Metre" rather than a generic "per qty": fabric at
                 // ₹1,000 means something quite different from a saree at
@@ -635,6 +703,7 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
                       [for (final id in imageSlots) if (id != s.id) id];
                   onRemoveCapture?.call(s);
                 }
+                onFieldChanged();
               }),
             ),
             if (onCapture != null && imageSlots.contains(s.id))
@@ -673,6 +742,10 @@ class RecordTabBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        // A numeric keypad has no return key to dismiss itself with — a drag
+        // on the tab body is the one gesture every tab already offers, so it
+        // doubles as "put the keyboard away".
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: children,
       );
 }
@@ -830,18 +903,68 @@ class RecordFieldWrap extends StatelessWidget {
       );
 }
 
+/// How many `fieldErrors` land on each tab, for a badge — tab index →
+/// count. A key with nowhere in [fieldErrorTabIndex] is silently dropped
+/// rather than crashing a build over a key nobody has mapped yet.
+Map<int, int> tabErrorCounts(Map<String, String> fieldErrors) {
+  final counts = <int, int>{};
+  for (final key in fieldErrors.keys) {
+    final tab = fieldErrorTabIndex[key];
+    if (tab != null) counts[tab] = (counts[tab] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/// A plain [Tab], or the same label with a small count badge when [count]
+/// is above zero — used to mark which tab an error actually lives on.
+Tab tabWithErrorBadge(String label, int count) {
+  if (count == 0) return Tab(text: label);
+
+  return Tab(
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label),
+        const SizedBox(width: 5),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE53935),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            '$count',
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+              height: 1.2,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 /// Save (or Create), and what is still missing.
 ///
 /// Pinned rather than at the bottom of a tab: the questions are spread over
 /// six of them, and a button living on the last one would mean the answer to
 /// "am I done" is on a screen you have to go and find.
-class RecordSaveBar extends StatelessWidget {
+///
+/// The error list used to just be printed — three lines of red nobody could
+/// act on, naming a field without saying where it was. Collapsed to a count
+/// by default, and every listed error is now a way to get there: tapping one
+/// switches to its tab and, for the fields that have one, focuses it too.
+class RecordSaveBar extends StatefulWidget {
   const RecordSaveBar({
     super.key,
     required this.busy,
     required this.errors,
     required this.label,
     required this.onSave,
+    this.focusNodes = const {},
   });
 
   final bool busy;
@@ -849,9 +972,38 @@ class RecordSaveBar extends StatelessWidget {
   final String label;
   final VoidCallback onSave;
 
+  /// fieldErrors key → that field's own FocusNode, for the fields that have
+  /// one (price and quantity TextFields today). A picker-based field (colour,
+  /// craft technique, product type…) has nothing to literally focus — for
+  /// those, switching tabs is as far as a tap can take you.
+  final Map<String, FocusNode> focusNodes;
+
+  @override
+  State<RecordSaveBar> createState() => _RecordSaveBarState();
+}
+
+class _RecordSaveBarState extends State<RecordSaveBar> {
+  bool _expanded = false;
+
+  void _jumpTo(String key) {
+    final tab = fieldErrorTabIndex[key];
+    if (tab != null) {
+      DefaultTabController.of(context).animateTo(tab);
+    }
+    final focus = widget.focusNodes[key];
+    if (focus != null) {
+      // The target tab may still be animating into place; asking for focus
+      // next frame rather than this one is what makes that reliable.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (focus.canRequestFocus) focus.requestFocus();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.p;
+    final errors = widget.errors;
 
     return SafeArea(
       child: Container(
@@ -864,27 +1016,78 @@ class RecordSaveBar extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (errors.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
-                  // Named, because the field itself may be on another tab.
-                  errors.values.join(' · '),
-                  style: TextStyle(fontSize: 12, color: p.danger),
+            if (errors.isNotEmpty) ...[
+              InkWell(
+                onTap: () => setState(() => _expanded = !_expanded),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline, size: 16, color: p.danger),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '${errors.length} field${errors.length == 1 ? '' : 's'} '
+                          'need attention',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: p.danger,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        _expanded ? Icons.expand_less : Icons.expand_more,
+                        size: 18,
+                        color: p.danger,
+                      ),
+                    ],
+                  ),
                 ),
               ),
+              if (_expanded)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final entry in errors.entries)
+                        InkWell(
+                          onTap: () => _jumpTo(entry.key),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 5),
+                            child: Row(
+                              children: [
+                                Icon(Icons.chevron_right,
+                                    size: 16, color: p.danger),
+                                const SizedBox(width: 2),
+                                Expanded(
+                                  child: Text(
+                                    entry.value,
+                                    style: TextStyle(
+                                        fontSize: 12, color: p.danger),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+            ],
             FilledButton(
-              onPressed: busy ? null : onSave,
+              onPressed: widget.busy ? null : widget.onSave,
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 15),
               ),
-              child: busy
+              child: widget.busy
                   ? const SizedBox(
                       height: 20,
                       width: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : Text(label),
+                  : Text(widget.label),
             ),
           ],
         ),

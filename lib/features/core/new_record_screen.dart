@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/api_client.dart';
+import '../../core/product_draft_store.dart';
 import '../../models/core.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/async_view.dart';
@@ -57,9 +59,15 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
     with RecordFormFields {
   String? _location;
   final _qty = TextEditingController();
+  final _qtyFocus = FocusNode();
 
   bool _defaultsApplied = false;
   bool _busy = false;
+
+  /// A saved draft found on entry, waiting on the resume banner's Continue
+  /// or Discard — null once answered either way, or if there was none.
+  Map<String, dynamic>? _pendingDraft;
+  Timer? _draftSaveTimer;
 
   /// Held so the Basic tab can name who is filing, without threading the
   /// actor through five layers of builder to reach one chip.
@@ -84,10 +92,90 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
   final Map<String, File> _capturedPhotos = {};
 
   @override
+  void initState() {
+    super.initState();
+    _checkForDraft();
+  }
+
+  @override
   void dispose() {
+    _draftSaveTimer?.cancel();
     disposeFormFields();
     _qty.dispose();
+    _qtyFocus.dispose();
     super.dispose();
+  }
+
+  // ── Draft persistence ────────────────────────────────────────────────────
+  //
+  // Form fields only — a captured photo is a raw File handle that doesn't
+  // survive a cold start, and nothing else in the app durably stores one
+  // either. Losing an in-progress photo but not the thirty answers around it
+  // is still a large improvement over losing everything.
+
+  Future<void> _checkForDraft() async {
+    final draft = await ProductDraftStore.instance.read();
+    if (draft != null && mounted) setState(() => _pendingDraft = draft);
+  }
+
+  @override
+  void onFieldChanged() => _scheduleDraftSave();
+
+  void _scheduleDraftSave() {
+    _draftSaveTimer?.cancel();
+    _draftSaveTimer = Timer(const Duration(milliseconds: 500), _saveDraft);
+  }
+
+  Future<void> _saveDraft() => ProductDraftStore.instance.save({
+        'attrs': attrs,
+        'descriptors': descriptors,
+        'imageSlots': imageSlots,
+        'colourId': colourId,
+        'secondaryColourId': secondaryColourId,
+        'prices': {for (final p in priceKinds) p.key: prices[p.key]!.text},
+        'notes': notesField.text,
+        'name': nameField.text,
+        'nameIsCustom': nameIsCustom,
+        'location': _location,
+        'qty': _qty.text,
+      });
+
+  /// Restores a found draft over whatever the defaults branch already filled
+  /// in — this is resuming the same in-progress colourway, not seeding a new
+  /// one, so colour, prices, name and opening stock come back too.
+  void _applyDraft() {
+    final draft = _pendingDraft;
+    if (draft == null) return;
+
+    setState(() {
+      attrs
+        ..clear()
+        ..addAll(((draft['attrs'] as Map?) ?? const {}).cast<String, String?>());
+      descriptors = List<String>.from(draft['descriptors'] as List? ?? const []);
+      imageSlots = List<String>.from(draft['imageSlots'] as List? ?? const []);
+      colourId = draft['colourId'] as String?;
+      secondaryColourId = draft['secondaryColourId'] as String?;
+      final savedPrices =
+          ((draft['prices'] as Map?) ?? const {}).cast<String, dynamic>();
+      for (final p in priceKinds) {
+        prices[p.key]!.text = savedPrices[p.key] as String? ?? '';
+      }
+      notesField.text = draft['notes'] as String? ?? '';
+      nameField.text = draft['name'] as String? ?? '';
+      nameIsCustom = draft['nameIsCustom'] as bool? ?? false;
+      _location = draft['location'] as String?;
+      _qty.text = draft['qty'] as String? ?? '';
+      // Whatever the defaults branch already applied is superseded now —
+      // letting it run again once this frame is done would wipe this right
+      // back out.
+      _defaultsApplied = true;
+      _pendingDraft = null;
+    });
+  }
+
+  void _discardDraft() {
+    ProductDraftStore.instance.clear();
+    setState(() => _pendingDraft = null);
   }
 
   Future<void> _capturePhoto(CoreOption slot) async {
@@ -303,6 +391,10 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
   /// different colour, price and count. Clearing everything would make the
   /// second record as slow as the first.
   void _resetForNext() {
+    // A stray save re-writing the draft right after it's cleared would bring
+    // right back what this method exists to clear away.
+    _draftSaveTimer?.cancel();
+    ProductDraftStore.instance.clear();
     setState(() {
       // The save that key named is finished. The next record is a new intent
       // and gets a new name; keeping this one would make it a "duplicate" of
@@ -376,59 +468,85 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
             labelStyle:
                 const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
             unselectedLabelStyle: const TextStyle(fontSize: 12.5),
-            tabs: const [
-              Tab(text: 'Basic'),
-              Tab(text: 'Craft'),
-              Tab(text: 'Details'),
-              Tab(text: 'Prices'),
-              Tab(text: 'Images'),
-              Tab(text: 'Stock'),
-            ],
+            tabs: () {
+              final counts = tabErrorCounts(fieldErrors);
+              return [
+                tabWithErrorBadge('Basic', counts[0] ?? 0),
+                tabWithErrorBadge('Craft', counts[1] ?? 0),
+                const Tab(text: 'Details'),
+                tabWithErrorBadge('Prices', counts[3] ?? 0),
+                const Tab(text: 'Images'),
+                tabWithErrorBadge('Stock', counts[5] ?? 0),
+              ];
+            }(),
           ),
         ),
-        body: AsyncView<CoreOptions>(
-          value: options,
-          onRetry: () => ref.invalidate(coreOptionsProvider),
-          data: (opts) => AsyncView<List<CoreLocation>>(
-            value: locations,
-            onRetry: () => ref.invalidate(coreLocationsProvider),
-            data: (places) {
-              // Applied once, after the vocabulary arrives — Clothing, Saree
-              // and the rest, so the common case is already filled in.
-              if (!_defaultsApplied) {
-                _defaultsApplied = true;
-                final seed = widget.seedFrom;
-                if (seed != null) {
-                  attrs.addAll(seed.attributes);
-                  descriptors = List.of(seed.descriptors);
-                  imageSlots = [
-                    for (final image in seed.images)
-                      if (image.slotId != null) image.slotId!,
-                  ];
-                } else {
-                  attrs.addAll(defaultAttributes(opts));
-                  // Saree is the vocabulary's own default product type, so
-                  // the common case never touches setProductType at all —
-                  // the form simply opens already on it. Without this, the
-                  // "tick all four" convenience only ever fired for someone
-                  // who actively picked Saree from a different starting
-                  // type.
-                  final productTypeId = attrs['productType'];
-                  if (productTypeId != null &&
-                      labelOf(opts, 'product_type', productTypeId) == 'Saree') {
-                    imageSlots = sareeDefaultImageSlots(opts, productTypeId);
-                  }
-                }
-              }
+        // A numeric keypad has no return key of its own to dismiss it with —
+        // tapping anywhere outside the field it belongs to is the fallback
+        // every other kind of field already gets for free.
+        body: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: () => FocusScope.of(context).unfocus(),
+          child: Column(
+            children: [
+              if (_pendingDraft != null)
+                _ResumeDraftBanner(
+                  onContinue: _applyDraft,
+                  onDiscard: _discardDraft,
+                ),
+              Expanded(
+                child: AsyncView<CoreOptions>(
+                  value: options,
+                  onRetry: () => ref.invalidate(coreOptionsProvider),
+                  data: (opts) => AsyncView<List<CoreLocation>>(
+                    value: locations,
+                    onRetry: () => ref.invalidate(coreLocationsProvider),
+                    data: (places) {
+                      // Applied once, after the vocabulary arrives —
+                      // Clothing, Saree and the rest, so the common case is
+                      // already filled in.
+                      if (!_defaultsApplied) {
+                        _defaultsApplied = true;
+                        final seed = widget.seedFrom;
+                        if (seed != null) {
+                          attrs.addAll(seed.attributes);
+                          descriptors = List.of(seed.descriptors);
+                          imageSlots = [
+                            for (final image in seed.images)
+                              if (image.slotId != null) image.slotId!,
+                          ];
+                        } else {
+                          attrs.addAll(defaultAttributes(opts));
+                          // Saree is the vocabulary's own default product
+                          // type, so the common case never touches
+                          // setProductType at all — the form simply opens
+                          // already on it. Without this, the "tick all four"
+                          // convenience only ever fired for someone who
+                          // actively picked Saree from a different starting
+                          // type.
+                          final productTypeId = attrs['productType'];
+                          if (productTypeId != null &&
+                              labelOf(opts, 'product_type', productTypeId) ==
+                                  'Saree') {
+                            imageSlots =
+                                sareeDefaultImageSlots(opts, productTypeId);
+                          }
+                        }
+                      }
 
-              return _tabs(opts, places, auth.actor!);
-            },
+                      return _tabs(opts, places, auth.actor!);
+                    },
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         bottomNavigationBar: RecordSaveBar(
           busy: _busy,
           errors: fieldErrors,
           label: 'Create record',
+          focusNodes: {...priceFocusNodes, 'openingStock': _qtyFocus},
           onSave: () {
             final opts = options.value;
             if (opts != null) _submit(opts);
@@ -531,17 +649,35 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
             value: _location,
             allowClear: true,
             options: [for (final l in internal) PickerOption(l.id, l.name)],
-            onChanged: (v) => setState(() => _location = v),
+            onChanged: (v) => setState(() {
+              _location = v;
+              _scheduleDraftSave();
+            }),
           ),
         ),
         RecordFieldWrap(
-          error: fieldErrors['quantity'],
+          // Keyed 'openingStock' — what the server's own validation actually
+          // names this error (records/actions.ts), not 'quantity': the two
+          // fields around it are a location and a count, and neither name is
+          // what a failed create reports back.
+          error: fieldErrors['openingStock'],
           child: TextField(
             controller: _qty,
+            focusNode: _qtyFocus,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            // See the matching comment on the price fields in
+            // record_form_fields.dart — same bug, same fix.
+            onChanged: (_) => setState(() {
+              fieldErrors = {...fieldErrors}..remove('openingStock');
+              _scheduleDraftSave();
+            }),
             decoration: InputDecoration(
-              labelText: uom == null ? 'How many' : 'How many ($uom)',
+              // A record needs opening stock to be created at all — the
+              // server refuses one with none — so this is required in
+              // practice even though a record can later be sold down to
+              // zero. Marked the same way every other mandatory field is.
+              labelText: uom == null ? 'How many *' : 'How many ($uom) *',
               border: const OutlineInputBorder(),
             ),
           ),
@@ -551,6 +687,41 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
           'different act and gets its own screen.',
         ),
       ],
+    );
+  }
+}
+
+/// Sits above the tabs rather than inside one — a draft left mid-form could
+/// have been on any of them, and the offer to resume it should not depend on
+/// which one happens to be showing.
+class _ResumeDraftBanner extends StatelessWidget {
+  const _ResumeDraftBanner({required this.onContinue, required this.onDiscard});
+
+  final VoidCallback onContinue;
+  final VoidCallback onDiscard;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+      color: p.surface3,
+      child: Row(
+        children: [
+          Icon(Icons.history, size: 18, color: p.textSecondary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Resume unsaved product?',
+              style: TextStyle(fontSize: 13, color: p.text),
+            ),
+          ),
+          TextButton(onPressed: onDiscard, child: const Text('Discard')),
+          FilledButton(onPressed: onContinue, child: const Text('Continue')),
+        ],
+      ),
     );
   }
 }
