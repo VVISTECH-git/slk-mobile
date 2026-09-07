@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -6,6 +8,28 @@ import '../../theme/app_theme.dart';
 import '../../widgets/picker_field.dart';
 import 'multi_picker_field.dart';
 import 'record_fields.dart';
+
+/// Every slot Images would offer for a saree — Body, Pallu, Border and
+/// Blouse in the live vocabulary — wanted by default rather than boxes
+/// somebody has to remember to tick.
+///
+/// Matches [buildImagesTab]'s own "which slots does this product type see"
+/// rule exactly (`parentId == null || parentId == productTypeId`), not just
+/// slots parented to Saree specifically: today's four are all unparented —
+/// universal values nothing has scoped to a type — so a stricter
+/// exact-parent match would default nothing at all, while still ticking
+/// every slot Saree is actually shown stays correct if a value is ever
+/// parented to it later.
+///
+/// Pulled out so both the moment somebody actively picks Saree
+/// ([RecordFormFields.setProductType]) and the moment a brand-new record
+/// simply opens already defaulted to it ([NewRecordScreen]'s own defaults
+/// application, which never calls setProductType at all) apply the exact
+/// same set.
+List<String> sareeDefaultImageSlots(CoreOptions o, String productTypeId) => [
+      for (final s in o['image_slot'] ?? const <CoreOption>[])
+        if (s.parentId == null || s.parentId == productTypeId) s.id,
+    ];
 
 /// Every question the web editor asks, built once and shared by the screen
 /// that creates a record and the one that edits it.
@@ -94,11 +118,8 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
       // anything new. Applying the default unconditionally there would wipe
       // an already-photographed slot outside these four, or silently restore
       // one somebody had deliberately unticked.
-      if (key == 'productType' && chosen?.label == 'Saree' && imageSlots.isEmpty) {
-        imageSlots = [
-          for (final s in o['image_slot'] ?? const <CoreOption>[])
-            if (s.parentId == v) s.id,
-        ];
+      if (key == 'productType' && chosen?.label == 'Saree' && imageSlots.isEmpty && v != null) {
+        imageSlots = sareeDefaultImageSlots(o, v);
       }
     });
   }
@@ -562,7 +583,18 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
 
   // ── Images ────────────────────────────────────────────────────────────────
 
-  Widget buildImagesTab(CoreOptions o, bool home, {String? note}) {
+  Widget buildImagesTab(
+    CoreOptions o,
+    bool home, {
+    String? note,
+    /// Slot id → a photograph already taken for it, waiting to be sent once
+    /// there is a record to send it to. Only [NewRecordScreen] passes this —
+    /// the edit screen has a record already and sends straight away, on its
+    /// own separate Photographs screen.
+    Map<String, File>? capturedPhotos,
+    void Function(CoreOption slot)? onCapture,
+    void Function(CoreOption slot)? onRemoveCapture,
+  }) {
     // Which photographs a product needs depends on what it is: a saree is
     // judged on Body, Pallu, Border and Blouse, and a bedsheet is not. A slot
     // naming a product type is offered only under it; one naming none is
@@ -577,15 +609,19 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
     return RecordTabBody(
       children: [
         Text(
-          'Which photographs this product should have. Ticking a slot records '
-          'that one is wanted — the photograph itself is taken later.',
+          onCapture == null
+              ? 'Which photographs this product should have. Ticking a slot '
+                  'records that one is wanted — the photograph itself is '
+                  'taken later.'
+              : 'Which photographs this product should have — and, for any '
+                  "you're holding it for right now, the photograph itself.",
           style: TextStyle(fontSize: 13, color: context.p.textSecondary),
         ),
         const SizedBox(height: 12),
         if (slots.isEmpty)
           RecordNote('No image slots are defined for this product type yet.')
         else
-          for (final s in slots)
+          for (final s in slots) ...[
             CheckboxListTile(
               value: imageSlots.contains(s.id),
               dense: true,
@@ -597,15 +633,30 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
                 } else {
                   imageSlots =
                       [for (final id in imageSlots) if (id != s.id) id];
+                  onRemoveCapture?.call(s);
                 }
               }),
             ),
+            if (onCapture != null && imageSlots.contains(s.id))
+              Padding(
+                padding: const EdgeInsets.only(left: 56, right: 16, bottom: 10),
+                child: _CaptureRow(
+                  file: capturedPhotos?[s.id],
+                  label: s.label,
+                  onCapture: () => onCapture(s),
+                  onRemove: () => onRemoveCapture?.call(s),
+                ),
+              ),
+          ],
         const SizedBox(height: 16),
         RecordNote(
           note ??
-              'The camera opens on the next screen, once the record exists — '
-                  'a photograph has to belong to something. Slots left '
-                  'unphotographed stay on the shot list.',
+              (onCapture == null
+                  ? 'The camera opens on the next screen, once the record '
+                      'exists — a photograph has to belong to something. '
+                      'Slots left unphotographed stay on the shot list.'
+                  : 'A slot ticked but not photographed here still saves — '
+                      'it just stays on the shot list, same as ever.'),
         ),
       ],
     );
@@ -665,6 +716,58 @@ class RecordNote extends StatelessWidget {
         text,
         style: TextStyle(fontSize: 12, color: p.textSecondary, height: 1.4),
       ),
+    );
+  }
+}
+
+/// A thumbnail and a Retake, or a plain "Take photo now" button — whichever
+/// this slot currently has. Purely local: nothing here talks to the network,
+/// only the record it belongs to does that, once it exists.
+class _CaptureRow extends StatelessWidget {
+  const _CaptureRow({
+    required this.file,
+    required this.label,
+    required this.onCapture,
+    required this.onRemove,
+  });
+
+  final File? file;
+  final String label;
+  final VoidCallback onCapture;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+
+    if (file == null) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          onPressed: onCapture,
+          icon: const Icon(Icons.add_a_photo_outlined, size: 16),
+          label: const Text('Take photo now'),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.file(file!, width: 44, height: 44, fit: BoxFit.cover),
+        ),
+        const SizedBox(width: 10),
+        Text('$label photographed',
+            style: TextStyle(fontSize: 12.5, color: p.success)),
+        const Spacer(),
+        TextButton(onPressed: onCapture, child: const Text('Retake')),
+        IconButton(
+          tooltip: 'Remove this photo',
+          icon: Icon(Icons.close, size: 18, color: p.textMuted),
+          onPressed: onRemove,
+        ),
+      ],
     );
   }
 }

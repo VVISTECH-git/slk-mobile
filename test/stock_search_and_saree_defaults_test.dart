@@ -86,10 +86,12 @@ void main() {
           opt('bedsheets', 'Bedsheets'),
         ],
         'image_slot': [
-          opt('body', 'Body', parent: 'saree'),
-          opt('pallu', 'Pallu', parent: 'saree'),
-          opt('border', 'Border', parent: 'saree'),
-          opt('blouse', 'Blouse', parent: 'saree'),
+          // Unparented, matching the live vocabulary exactly: nothing has
+          // ever scoped these four to a product type, Saree included.
+          opt('body', 'Body'),
+          opt('pallu', 'Pallu'),
+          opt('border', 'Border'),
+          opt('blouse', 'Blouse'),
           // Belongs to a different product type — must not be swept in.
           opt('flat-lay', 'Flat lay', parent: 'bedsheets'),
         ],
@@ -147,6 +149,40 @@ void main() {
           {'body', 'pallu', 'border', 'full-length'},
           reason: 'confirming an unchanged Product Type must not touch '
               "slots that were already someone's own answer",
+        );
+      },
+    );
+
+    test(
+      'REGRESSION: a record that opens already defaulted to Saree still gets all four',
+      () {
+        // defaultAttributes() writes attrs['productType'] directly — it
+        // never calls setProductType — so when Saree is the vocabulary's
+        // own default, a brand-new record used to open with none of the
+        // four slots ticked, because the only place that applied them lived
+        // inside setProductType and nothing had called it.
+        final options = <String, List<CoreOption>>{
+          'product_type': [
+            opt('saree', 'Saree', parent: 'clothing'),
+            opt('bedsheets', 'Bedsheets'),
+          ],
+          'image_slot': [
+            opt('body', 'Body'),
+            opt('pallu', 'Pallu'),
+            opt('border', 'Border'),
+            opt('blouse', 'Blouse'),
+            // Belongs to a different product type — must not be swept in,
+            // even under the broader null-or-matching-parent filter.
+            opt('flat-lay', 'Flat lay', parent: 'bedsheets'),
+          ],
+        };
+
+        expect(
+          sareeDefaultImageSlots(options, 'saree').toSet(),
+          {'body', 'pallu', 'border', 'blouse'},
+          reason: 'new_record_screen.dart calls this directly once it finds '
+              "the defaulted product type is Saree — see its own defaults "
+              "block, which setProductType's tests above cannot reach.",
         );
       },
     );

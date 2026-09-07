@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/api_client.dart';
 import '../../models/core.dart';
@@ -8,6 +11,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/picker_field.dart';
 import 'core_auth.dart';
+import 'core_photos.dart';
 import 'core_sign_in_screen.dart';
 import 'record_fields.dart';
 import 'record_form_fields.dart';
@@ -72,12 +76,68 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
   /// SAR-GEN-COT-0009 came to exist.
   String? _saveKey;
 
+  /// Slot id → a photograph already taken for it. Purely local until the
+  /// record exists — a photograph belongs to a colourway, and there is
+  /// nowhere to send one before there is a colourway. Sent the moment
+  /// Create succeeds, then cleared: the next record (see [_resetForNext])
+  /// is a new intent and starts its own shot list.
+  final Map<String, File> _capturedPhotos = {};
+
   @override
   void dispose() {
     disposeFormFields();
     _qty.dispose();
     super.dispose();
   }
+
+  Future<void> _capturePhoto(CoreOption slot) async {
+    final storage = ref.read(coreStorageProvider).valueOrNull;
+    if (storage != null && !storage.ready) {
+      showError(
+        context,
+        'Image storage is not set up on the server. Missing '
+        '${storage.missing.join(", ")}.',
+      );
+      return;
+    }
+
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: context.p.surface2,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: Text('Photograph the ${slot.label.toLowerCase()}'),
+              onTap: () => Navigator.pop(sheet, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from the gallery'),
+              onTap: () => Navigator.pop(sheet, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+
+    // Same limits RecordPhotosScreen uses on the file it eventually sends.
+    final picked = await ImagePicker().pickImage(
+      source: source,
+      maxWidth: 1600,
+      maxHeight: 1600,
+      imageQuality: 80,
+    );
+    if (picked == null || !mounted) return;
+
+    setState(() => _capturedPhotos[slot.id] = File(picked.path));
+  }
+
+  void _removeCapturedPhoto(CoreOption slot) =>
+      setState(() => _capturedPhotos.remove(slot.id));
 
   // ── Saving ────────────────────────────────────────────────────────────────
 
@@ -162,11 +222,51 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
         }
       }
 
+      /*
+        Sent now that there is finally somewhere to send them — a photograph
+        belongs to a colourway, and this is the first moment one exists.
+        One failure must not lose another: each slot is its own try, and
+        what did not go through is named rather than silently dropped, so
+        the next stop is the Photographs screen rather than a shrug.
+      */
+      final uploaded = <String>{};
+      final failed = <String>[];
+      if (_capturedPhotos.isNotEmpty) {
+        final photos = ref.read(corePhotosProvider);
+        for (final entry in _capturedPhotos.entries) {
+          try {
+            await photos.upload(
+              recordId: id,
+              slotId: entry.key,
+              file: entry.value,
+            );
+            uploaded.add(entry.key);
+          } catch (_) {
+            failed.add(labelOf(options, 'image_slot', entry.key) ?? 'a photograph');
+          }
+        }
+        _capturedPhotos.clear();
+      }
+
       if (!mounted) return;
 
-      showOk(context, code == null ? 'Record created.' : 'Created $code.');
+      // One snackbar, not two — showError's hideCurrentSnackBar() would
+      // otherwise dismiss showOk's before anyone read it.
+      final parts = [code == null ? 'Record created.' : 'Created $code.'];
+      if (uploaded.isNotEmpty) {
+        parts.add(
+          '${uploaded.length} photograph${uploaded.length == 1 ? '' : 's'} saved.',
+        );
+      }
+      if (failed.isNotEmpty) {
+        parts.add('${failed.join(", ")} did not upload — retake from the record.');
+      }
+      final message = parts.join(' ');
+      failed.isEmpty ? showOk(context, message) : showError(context, message);
 
-      final slots = imageSlots.isNotEmpty;
+      // Only what is still missing sends anyone straight to the camera —
+      // a capture made just now already covered that slot.
+      final slots = imageSlots.any((s) => !uploaded.contains(s));
       _resetForNext();
 
       /*
@@ -230,6 +330,9 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
 
     final options = ref.watch(coreOptionsProvider);
     final locations = ref.watch(coreLocationsProvider);
+    // Watched here purely to start the check early — asked again, cheaply,
+    // from cache, the moment somebody actually taps to take a photo.
+    ref.watch(coreStorageProvider);
 
     return DefaultTabController(
       length: 6,
@@ -304,6 +407,17 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
                   ];
                 } else {
                   attrs.addAll(defaultAttributes(opts));
+                  // Saree is the vocabulary's own default product type, so
+                  // the common case never touches setProductType at all —
+                  // the form simply opens already on it. Without this, the
+                  // "tick all four" convenience only ever fired for someone
+                  // who actively picked Saree from a different starting
+                  // type.
+                  final productTypeId = attrs['productType'];
+                  if (productTypeId != null &&
+                      labelOf(opts, 'product_type', productTypeId) == 'Saree') {
+                    imageSlots = sareeDefaultImageSlots(opts, productTypeId);
+                  }
                 }
               }
 
@@ -385,7 +499,13 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
         buildCraftTab(o, craft),
         buildDetailsTab(o, isSaree, withBlouse),
         buildPricesTab(uom),
-        buildImagesTab(o, home),
+        buildImagesTab(
+          o,
+          home,
+          capturedPhotos: _capturedPhotos,
+          onCapture: _capturePhoto,
+          onRemoveCapture: _removeCapturedPhoto,
+        ),
         _stock(places, uom),
       ],
     );
