@@ -186,6 +186,18 @@ class _WheelPickerSheetState extends State<_WheelPickerSheet> {
                     style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                   ),
                 ),
+                /*
+                  Clear and Done are different actions, not two names for one
+                  button. This used to show only whichever of the two an
+                  if/else picked — a field that already carried a value and
+                  allowed clearing got Clear alone, so scrolling the wheel to
+                  a new choice had nothing to confirm it with: Cancel discards,
+                  Clear wipes to nothing, and neither one saves what the wheel
+                  is actually sitting on. Changing an already-answered
+                  optional field took two separate visits to this sheet —
+                  clear it, reopen, then pick — because only the second visit
+                  ever showed Done.
+                */
                 if (widget.allowClear && widget.current != null)
                   TextButton(
                     onPressed: () => Navigator.pop(
@@ -194,18 +206,17 @@ class _WheelPickerSheetState extends State<_WheelPickerSheet> {
                     ),
                     style: TextButton.styleFrom(foregroundColor: p.danger),
                     child: const Text('Clear'),
-                  )
-                else
-                  TextButton(
-                    onPressed: _confirm,
-                    child: Text(
-                      'Done',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: p.primary,
-                      ),
+                  ),
+                TextButton(
+                  onPressed: _confirm,
+                  child: Text(
+                    'Done',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: p.primary,
                     ),
                   ),
+                ),
               ],
             ),
           ),
