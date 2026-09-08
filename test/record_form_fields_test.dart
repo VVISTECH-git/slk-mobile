@@ -164,4 +164,134 @@ void main() {
       );
     });
   });
+
+  group('requiredErrorsForTab', () {
+    test('Basic: names every missing field, worded like the server', () {
+      final errors = requiredErrorsForTab(
+        tabIndex: 0,
+        attrs: const {},
+        home: false,
+      );
+
+      expect(errors, {
+        'industry': 'Industry is needed',
+        'productType': 'Product type is needed',
+        'fibreType': 'Fiber type is needed',
+      });
+    });
+
+    test('Basic: the home industry checks its own product type key', () {
+      final errors = requiredErrorsForTab(
+        tabIndex: 0,
+        attrs: const {'industry': 'home'},
+        home: true,
+      );
+
+      expect(errors.containsKey('homeProductType'), isTrue);
+      expect(errors.containsKey('productType'), isFalse);
+    });
+
+    test('Basic: answered fields drop out, one at a time', () {
+      final errors = requiredErrorsForTab(
+        tabIndex: 0,
+        attrs: const {'industry': 'clothing', 'productType': 'saree'},
+        home: false,
+      );
+
+      expect(errors, {'fibreType': 'Fiber type is needed'});
+    });
+
+    test('Craft: colour and craft technique are both required', () {
+      final errors = requiredErrorsForTab(
+        tabIndex: 1,
+        attrs: const {},
+        home: false,
+      );
+
+      expect(errors, {
+        'colour': 'Colour is needed',
+        'craftTechnique': 'Craft technique is needed',
+      });
+    });
+
+    test('Prices: only retail is required, and only when blank', () {
+      expect(
+        requiredErrorsForTab(
+          tabIndex: 3,
+          attrs: const {},
+          home: false,
+          retailPrice: '',
+        ),
+        {'retail': 'A selling price is needed'},
+      );
+
+      expect(
+        requiredErrorsForTab(
+          tabIndex: 3,
+          attrs: const {},
+          home: false,
+          retailPrice: '2500',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('Details and Images ask for nothing — Next always passes through',
+        () {
+      for (final tab in [2, 4]) {
+        expect(
+          requiredErrorsForTab(tabIndex: tab, attrs: const {}, home: false),
+          isEmpty,
+        );
+      }
+    });
+
+    test('Stock: opening quantity only checked when asked to', () {
+      // Not asked — the edit screen's own Stock tab, which never wires this.
+      expect(
+        requiredErrorsForTab(tabIndex: 5, attrs: const {}, home: false),
+        isEmpty,
+      );
+
+      // Asked, and nothing entered.
+      expect(
+        requiredErrorsForTab(
+          tabIndex: 5,
+          attrs: const {},
+          home: false,
+          checkOpeningStock: true,
+        ),
+        {
+          'openingStock':
+              'At least one location needs a quantity greater than zero.',
+        },
+      );
+
+      // Asked, and a location with a zero or blank quantity is still nothing.
+      expect(
+        requiredErrorsForTab(
+          tabIndex: 5,
+          attrs: const {},
+          home: false,
+          checkOpeningStock: true,
+          openingLocationId: 'wh-1',
+          openingQty: '0',
+        ),
+        isNotEmpty,
+      );
+
+      // Asked, and answered.
+      expect(
+        requiredErrorsForTab(
+          tabIndex: 5,
+          attrs: const {},
+          home: false,
+          checkOpeningStock: true,
+          openingLocationId: 'wh-1',
+          openingQty: '5',
+        ),
+        isEmpty,
+      );
+    });
+  });
 }

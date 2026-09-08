@@ -66,6 +66,63 @@ String? firstErrorKey(Map<String, String> errors) {
   return best;
 }
 
+/// What "Next" checks before leaving a tab — the same fields slk-core's own
+/// `REQUIRED` list (apps/web/src/app/records/actions.ts) would refuse a
+/// Create over, asked one tab at a time instead of all six at once.
+///
+/// The wording matches the server's exactly, on purpose: a person who sees
+/// "Fiber type is needed" here and the same sentence back from a failed
+/// submit should never wonder if they are looking at two different rules.
+///
+/// Empty for a tab with nothing required on it (Details, Images) or one this
+/// function does not gate (Craft, Prices, Stock beyond opening stock still
+/// rely on the fuller check below) — [requiredErrorsForTab] is what actually
+/// answers "is this tab done".
+Map<String, String> requiredErrorsForTab({
+  required int tabIndex,
+  required Map<String, String?> attrs,
+  required bool home,
+  String? colourId,
+  String? retailPrice,
+  /// Only the create screen's Stock tab asks for this — the edit screen's
+  /// own Stock tab is a ledger and a correction, neither of which this
+  /// function is ever asked about (it is never wired up there).
+  bool checkOpeningStock = false,
+  String? openingLocationId,
+  String? openingQty,
+}) {
+  final errors = <String, String>{};
+
+  bool blank(String? v) => v == null || v.trim().isEmpty;
+
+  switch (tabIndex) {
+    case 0:
+      if (blank(attrs['industry'])) errors['industry'] = 'Industry is needed';
+
+      final typeKey = home ? 'homeProductType' : 'productType';
+      if (blank(attrs[typeKey])) errors[typeKey] = 'Product type is needed';
+
+      if (blank(attrs['fibreType'])) errors['fibreType'] = 'Fiber type is needed';
+    case 1:
+      if (blank(colourId)) errors['colour'] = 'Colour is needed';
+      if (blank(attrs['craftTechnique'])) {
+        errors['craftTechnique'] = 'Craft technique is needed';
+      }
+    case 3:
+      if (blank(retailPrice)) errors['retail'] = 'A selling price is needed';
+    case 5:
+      if (checkOpeningStock) {
+        final qty = num.tryParse(openingQty ?? '') ?? 0;
+        if (blank(openingLocationId) || qty <= 0) {
+          errors['openingStock'] =
+              'At least one location needs a quantity greater than zero.';
+        }
+      }
+  }
+
+  return errors;
+}
+
 /// Every slot Images would offer for a saree — Body, Pallu, Border and
 /// Blouse in the live vocabulary — wanted by default rather than boxes
 /// somebody has to remember to tick.
@@ -1007,6 +1064,8 @@ class RecordSaveBar extends StatefulWidget {
     required this.onSave,
     this.focusNodes = const {},
     this.sequential = false,
+    this.validateTab,
+    this.onTabInvalid,
   });
 
   final bool busy;
@@ -1031,6 +1090,21 @@ class RecordSaveBar extends StatefulWidget {
   /// Tabs stay tappable either way — this changes what the pinned button
   /// does, not whether somebody can jump to Prices directly to fix a typo.
   final bool sequential;
+
+  /// What the tab at this index still needs before "Next" is allowed to
+  /// leave it — [requiredErrorsForTab], with the screen's own field values
+  /// closed over. Empty means the tab is answered. Only consulted when
+  /// [sequential] is true; the edit screen's persistent bar never calls this.
+  ///
+  /// Without this, "Next" moved on regardless of whether anything on the
+  /// tab it was leaving had been answered — which read as this screen
+  /// promising to ask for the mandatory fields and then not asking.
+  final Map<String, String> Function(int tabIndex)? validateTab;
+
+  /// [validateTab] found something missing — here is what, so the screen
+  /// holding the real field state can show it through the same [errors] map
+  /// this bar already displays and jumps from.
+  final void Function(Map<String, String> errors)? onTabInvalid;
 
   @override
   State<RecordSaveBar> createState() => _RecordSaveBarState();
@@ -1070,6 +1144,25 @@ class _RecordSaveBarState extends State<RecordSaveBar> {
 
   bool get _onLastTab =>
       _tabController == null || _tabController!.index == _tabController!.length - 1;
+
+  /// "Next" — but only once the tab it is leaving actually answers what it
+  /// asks. A blocked tap does not stay silent: [onTabInvalid] hands the
+  /// missing fields to [RecordSaveBar.errors], and this bar's own
+  /// [didUpdateWidget] then expands the summary and focuses the first one,
+  /// exactly as it already does for a rejected submit.
+  void _onNext() {
+    final controller = _tabController;
+    if (controller == null) return;
+
+    final tabErrors = widget.validateTab?.call(controller.index) ?? const {};
+
+    if (tabErrors.isNotEmpty) {
+      widget.onTabInvalid?.call(tabErrors);
+      return;
+    }
+
+    controller.animateTo(controller.index + 1);
+  }
 
   @override
   void didUpdateWidget(RecordSaveBar oldWidget) {
@@ -1202,8 +1295,7 @@ class _RecordSaveBarState extends State<RecordSaveBar> {
                     ? null
                     : (onLastTab
                         ? widget.onSave
-                        : () => _tabController
-                            ?.animateTo(_tabController!.index + 1)),
+                        : _onNext),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 15),
                 ),

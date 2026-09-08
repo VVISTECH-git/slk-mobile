@@ -560,6 +560,26 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
           // Filing a record is thirty questions in order; the button leads
           // through them instead of asking to file on the very first one.
           sequential: true,
+          // "Next" checks the tab it is leaving against the same
+          // requirements a submit would — a jump straight past three
+          // mandatory fields is what a persistent Create button used to
+          // allow, and reads as this screen promising to ask and not asking.
+          validateTab: (tabIndex) {
+            final opts = options.value;
+            if (opts == null) return const {};
+
+            return requiredErrorsForTab(
+              tabIndex: tabIndex,
+              attrs: attrs,
+              home: isHomeIndustry(labelOf(opts, 'industry', attrs['industry'])),
+              colourId: colourId,
+              retailPrice: prices['retail']!.text,
+              checkOpeningStock: true,
+              openingLocationId: _location,
+              openingQty: _qty.text,
+            );
+          },
+          onTabInvalid: (errors) => setState(() => fieldErrors = errors),
           onSave: () {
             final opts = options.value;
             if (opts != null) _submit(opts);
