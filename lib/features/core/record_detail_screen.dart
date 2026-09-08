@@ -279,6 +279,10 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
             // beats a clipped label.
             isScrollable: true,
             tabAlignment: TabAlignment.start,
+            // Without this, a badge on the last tab sits flush against the
+            // screen edge — invisible at rest, with nothing on screen saying
+            // a swipe would reveal it. Same fix as the create screen's.
+            padding: const EdgeInsets.only(right: 44),
             labelColor: context.p.onAppBar,
             unselectedLabelColor: context.p.onAppBar.withValues(alpha: 0.72),
             indicatorColor: context.p.onAppBar,

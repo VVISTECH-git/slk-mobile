@@ -461,10 +461,20 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
               background and vanished, and since the form opens on Basic, the
               tab that vanished was the one you were looking at.
             */
+            // Scrollable, matching the edit screen's own fix — six fixed-width
+            // tabs clipped "Stock" at the edge with nothing to say more was
+            // there, and an error badge widening a label only made it worse.
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            // Without this, a badge on the last tab sat flush against the
+            // screen edge — invisible at rest, and nothing on screen said a
+            // swipe would reveal it. Confirmed against a real failed submit:
+            // Stock's own badge was there and correctly counted, just cut off.
+            padding: const EdgeInsets.only(right: 44),
             labelColor: context.p.onAppBar,
             unselectedLabelColor: context.p.onAppBar.withValues(alpha: 0.72),
             indicatorColor: context.p.onAppBar,
-            labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+            labelPadding: const EdgeInsets.symmetric(horizontal: 12),
             labelStyle:
                 const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
             unselectedLabelStyle: const TextStyle(fontSize: 12.5),
@@ -547,6 +557,9 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
           errors: fieldErrors,
           label: 'Create record',
           focusNodes: {...priceFocusNodes, 'openingStock': _qtyFocus},
+          // Filing a record is thirty questions in order; the button leads
+          // through them instead of asking to file on the very first one.
+          sequential: true,
           onSave: () {
             final opts = options.value;
             if (opts != null) _submit(opts);

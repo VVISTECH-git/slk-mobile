@@ -1,6 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:slk_mobile/features/core/record_fields.dart';
 import 'package:slk_mobile/features/core/record_form_fields.dart';
+import 'package:slk_mobile/models/core.dart';
+
+CoreOption _opt(String id, String label, {String? parent}) =>
+    CoreOption(id: id, label: label, parentId: parent);
 
 void main() {
   group('tabErrorCounts', () {
@@ -45,6 +50,118 @@ void main() {
       // not the field's local name — a mismatch here is exactly the bug
       // that shipped once already (silently no-op badge, clear and jump).
       expect(fieldErrorTabIndex['openingStock'], 5);
+      // The edit screen's own stock correction — a different server key
+      // from create's opening count, on the same tab.
+      expect(fieldErrorTabIndex['quantity'], 5);
+    });
+  });
+
+  group('firstErrorKey', () {
+    test('nothing to jump to when there are no errors', () {
+      expect(firstErrorKey(const {}), isNull);
+    });
+
+    test('picks the error whose tab reads earliest, not the server\'s order',
+        () {
+      // Prices (tab 3) listed before Basic (tab 0) in the map — the jump
+      // should still land on Basic first, because that is what somebody
+      // filling the form in order would hit first.
+      final key = firstErrorKey({
+        'retail': 'A selling price is needed',
+        'industry': 'Industry is needed',
+      });
+
+      expect(key, 'industry');
+    });
+
+    test('a key with no known tab never wins over one that has a home', () {
+      final key = firstErrorKey({
+        'somethingNew': 'unmapped',
+        'colour': 'A primary colour is needed',
+      });
+
+      expect(key, 'colour');
+    });
+  });
+
+  group('composeDesignNamePreview', () {
+    final options = <String, List<CoreOption>>{
+      'descriptor': [_opt('soft', 'soft'), _opt('pure', 'pure')],
+      'craft_technique': [_opt('kalamkari', 'Kalamkari')],
+      'fibre_type': [
+        _opt('silk', 'Silk'),
+        _opt('sico', 'Sico (Silk-Cotton Blend)'),
+      ],
+      'product_type': [_opt('saree', 'Saree')],
+      'garment_type': [_opt('kurthi', 'Kurthi')],
+      'home_product_type': [_opt('bedsheet', 'Bedsheet')],
+    };
+
+    test('reads as a name: descriptors, craft, fibre, then the noun', () {
+      final name = composeDesignNamePreview(
+        options: options,
+        descriptorIds: ['soft', 'pure'],
+        attrs: {'craftTechnique': 'kalamkari', 'fibreType': 'silk', 'productType': 'saree'},
+        home: false,
+      );
+
+      expect(name, 'Soft Pure Kalamkari Silk Saree');
+    });
+
+    test('a fibre\'s parenthesised half never reaches the name', () {
+      final name = composeDesignNamePreview(
+        options: options,
+        descriptorIds: const [],
+        attrs: {'fibreType': 'sico', 'productType': 'saree'},
+        home: false,
+      );
+
+      expect(name, 'Sico Saree');
+    });
+
+    test('the sub type stands in only where there is no product type', () {
+      final name = composeDesignNamePreview(
+        options: options,
+        descriptorIds: const [],
+        attrs: {'garmentType': 'kurthi'},
+        home: false,
+      );
+
+      expect(name, 'Kurthi');
+    });
+
+    test('a product type present is the noun, never the sub type', () {
+      final name = composeDesignNamePreview(
+        options: options,
+        descriptorIds: const [],
+        attrs: {'productType': 'saree', 'garmentType': 'kurthi'},
+        home: false,
+      );
+
+      expect(name, 'Saree');
+    });
+
+    test('home industry reads its own product type list', () {
+      final name = composeDesignNamePreview(
+        options: options,
+        descriptorIds: const [],
+        attrs: {'homeProductType': 'bedsheet', 'productType': 'saree'},
+        home: true,
+      );
+
+      expect(name, 'Bedsheet');
+    });
+
+    test('nothing chosen yet composes to nothing, not a broken sentence', () {
+      expect(
+        composeDesignNamePreview(
+          options: options,
+          descriptorIds: const [],
+          attrs: const {},
+          home: false,
+        ),
+        isEmpty,
+      );
     });
   });
 }

@@ -121,6 +121,63 @@ Map<String, String?> defaultAttributes(CoreOptions options) {
   return defaults;
 }
 
+/// The name the server will actually save, previewed here so the "Product
+/// name" field's placeholder shows what Create will do instead of a generic
+/// slogan.
+///
+/// Ported from slk-core's `designName()` (packages/domain/src/naming.ts) —
+/// word for word, including the order. **A change there needs the same
+/// change made here**, or this preview quietly starts showing a name Create
+/// will not actually produce, which is worse than showing nothing.
+///
+/// `designName()` also reads `regionalStyle`, `silkSubFamily` and
+/// `cottonSubFamily` — three legacy columns `textileMaterial` replaced, which
+/// this form has never asked for and a new record can never carry. They are
+/// left out rather than always passed as null.
+String composeDesignNamePreview({
+  required CoreOptions options,
+  required List<String> descriptorIds,
+  required Map<String, String?> attrs,
+  required bool home,
+}) {
+  String? label(String list, String? id) {
+    if (id == null) return null;
+    for (final o in options[list] ?? const <CoreOption>[]) {
+      if (o.id == id) return o.label;
+    }
+    return null;
+  }
+
+  final words = <String>[];
+
+  // Descriptors lead — "Soft Pure Kalamkari…" — in the order they were
+  // ticked, capitalised the way the server capitalises them.
+  for (final id in descriptorIds) {
+    final text = label('descriptor', id);
+    if (text != null && text.isNotEmpty) {
+      words.add(text[0].toUpperCase() + text.substring(1));
+    }
+  }
+
+  final craft = label('craft_technique', attrs['craftTechnique']);
+  if (craft != null) words.add(craft);
+
+  final fibre = label('fibre_type', attrs['fibreType']);
+  // "Sico (Silk-Cotton Blend)" names in the name, not its parenthesised half.
+  if (fibre != null) words.add(fibre.replaceAll(RegExp(r'\s*\(.*\)'), ''));
+
+  // The product type is the noun; its sub type stands in only where there is
+  // no product type at all — see designName()'s own comment on why the two
+  // are not interchangeable.
+  final noun = home
+      ? label('home_product_type', attrs['homeProductType'])
+      : (label('product_type', attrs['productType']) ??
+          label('garment_type', attrs['garmentType']));
+  if (noun != null) words.add(noun);
+
+  return words.join(' ');
+}
+
 /// The five prices a colourway carries, in the order the web editor shows them.
 const List<({String key, String label, String note})> priceKinds = [
   (key: 'cost', label: 'Cost', note: 'What it cost to buy or make'),

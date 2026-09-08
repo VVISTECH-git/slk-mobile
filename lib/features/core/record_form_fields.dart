@@ -33,7 +33,38 @@ const Map<String, int> fieldErrorTabIndex = {
   // under (see slk-core's records/actions.ts) — not the field's own local
   // name, which is what let this key silently never match anything.
   'openingStock': 5,
+  // The edit screen's own stock correction — a different field from create's
+  // opening count, and the server keys a failure on it under this name, not
+  // 'openingStock'.
+  'quantity': 5,
 };
+
+/// Which `fieldErrors` entry to jump to first — the one that reads earliest
+/// on the tabs, Basic before Craft before Prices, not whichever the server
+/// happened to list first in its response. A key with no known tab sorts
+/// last rather than crashing the comparison.
+///
+/// Null for an empty map — there is nothing to jump to.
+String? firstErrorKey(Map<String, String> errors) {
+  if (errors.isEmpty) return null;
+
+  // Tie-broken by the server's own order rather than left to List.sort's
+  // unspecified stability — two errors on the same tab should not swap
+  // places between one submit and the next for no reason a person can see.
+  final keys = errors.keys.toList();
+  var best = keys.first;
+  var bestTab = fieldErrorTabIndex[best] ?? 99;
+
+  for (final key in keys.skip(1)) {
+    final tab = fieldErrorTabIndex[key] ?? 99;
+    if (tab < bestTab) {
+      best = key;
+      bestTab = tab;
+    }
+  }
+
+  return best;
+}
 
 /// Every slot Images would offer for a saree — Body, Pallu, Border and
 /// Blouse in the live vocabulary — wanted by default rather than boxes
@@ -362,7 +393,17 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
           decoration: InputDecoration(
             labelText: 'Product name',
             border: const OutlineInputBorder(),
-            hintText: 'Builds itself from your choices',
+            // What Create will actually save — not a slogan. Only a generic
+            // placeholder while there is nothing yet to compose from.
+            hintText: () {
+              final preview = composeDesignNamePreview(
+                options: o,
+                descriptorIds: descriptors,
+                attrs: attrs,
+                home: home,
+              );
+              return preview.isEmpty ? 'Builds itself from your choices' : preview;
+            }(),
             helperText: nameIsCustom
                 ? 'Edited by hand — it will stop following attribute changes'
                 : 'Composed from the taxonomy. Type to override.',
@@ -965,6 +1006,7 @@ class RecordSaveBar extends StatefulWidget {
     required this.label,
     required this.onSave,
     this.focusNodes = const {},
+    this.sequential = false,
   });
 
   final bool busy;
@@ -978,12 +1020,85 @@ class RecordSaveBar extends StatefulWidget {
   /// those, switching tabs is as far as a tap can take you.
   final Map<String, FocusNode> focusNodes;
 
+  /// Filing a record is answering thirty questions in order; correcting one
+  /// is answering one. `false` (the edit screen's own default) keeps a
+  /// persistent [label] reachable from any tab — right for a fix that might
+  /// be one price on one tab. `true` (the create screen) instead reads
+  /// "Next" on every tab but the last, so the button itself asks for the
+  /// whole record before it asks to file it — and [label] is saved for the
+  /// one tab where filing is actually what happens.
+  ///
+  /// Tabs stay tappable either way — this changes what the pinned button
+  /// does, not whether somebody can jump to Prices directly to fix a typo.
+  final bool sequential;
+
   @override
   State<RecordSaveBar> createState() => _RecordSaveBarState();
 }
 
 class _RecordSaveBarState extends State<RecordSaveBar> {
   bool _expanded = false;
+  TabController? _tabController;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    // Only sequential mode cares which tab is showing — the edit screen's
+    // persistent bar has nothing to do with it and skips the lookup.
+    if (!widget.sequential) return;
+
+    final controller = DefaultTabController.of(context);
+    if (controller == _tabController) return;
+
+    _tabController?.removeListener(_onTabChanged);
+    _tabController = controller..addListener(_onTabChanged);
+  }
+
+  @override
+  void dispose() {
+    _tabController?.removeListener(_onTabChanged);
+    super.dispose();
+  }
+
+  // The swipe animation between tabs fires this many times per gesture;
+  // rebuilding on each is cheap; a bar which was still reading "Next" for a
+  // frame after the swipe already reached Stock was the visible alternative.
+  void _onTabChanged() {
+    if (mounted) setState(() {});
+  }
+
+  bool get _onLastTab =>
+      _tabController == null || _tabController!.index == _tabController!.length - 1;
+
+  @override
+  void didUpdateWidget(RecordSaveBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    /*
+      A submit that just came back rejected — not a field somebody is still
+      part-way through fixing.
+
+      Only the empty→non-empty transition jumps anywhere. Re-jumping on every
+      keystroke while errors are already showing would fight whichever tab
+      the person is actually correcting right now, undoing the very thing
+      they are doing. Tapping Create used to only reprint the same three
+      lines of red; this is what actually gets someone to the field.
+    */
+    if (oldWidget.errors.isEmpty && widget.errors.isNotEmpty) {
+      final key = firstErrorKey(widget.errors);
+      if (key == null) return;
+
+      setState(() => _expanded = true);
+      // The tab controller and the target field's own widget may both still
+      // be mid-rebuild from the setState that populated these errors —
+      // asking next frame is what makes both reliably exist by the time this
+      // runs, the same reason _jumpTo itself defers the focus request.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _jumpTo(key);
+      });
+    }
+  }
 
   void _jumpTo(String key) {
     final tab = fieldErrorTabIndex[key];
@@ -1076,19 +1191,40 @@ class _RecordSaveBarState extends State<RecordSaveBar> {
                   ),
                 ),
             ],
-            FilledButton(
-              onPressed: widget.busy ? null : widget.onSave,
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 15),
-              ),
-              child: widget.busy
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(widget.label),
-            ),
+            () {
+              // Only the last tab actually files anything — every other tab
+              // hands the button to whatever moves the person on, which is
+              // exactly what "Next" is.
+              final onLastTab = !widget.sequential || _onLastTab;
+
+              return FilledButton(
+                onPressed: widget.busy
+                    ? null
+                    : (onLastTab
+                        ? widget.onSave
+                        : () => _tabController
+                            ?.animateTo(_tabController!.index + 1)),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                ),
+                child: widget.busy
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : onLastTab
+                        ? Text(widget.label)
+                        : const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text('Next'),
+                              SizedBox(width: 6),
+                              Icon(Icons.arrow_forward, size: 18),
+                            ],
+                          ),
+              );
+            }(),
           ],
         ),
       ),
