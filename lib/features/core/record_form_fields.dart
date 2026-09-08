@@ -216,6 +216,30 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
     return null;
   }
 
+  /// The id behind a label, within an already-narrowed list. Used for the
+  /// handful of answers that default themselves off *another* answer rather
+  /// than off `isDefault` — "With Blouse" once the type is Saree, "Hand
+  /// Screen" once the technique is Kalamkari, "Unstitched" once a blouse is
+  /// in play — matched by label because that is the only thing these call
+  /// sites and the vocabulary agree on.
+  String? idForLabel(List<CoreOption>? values, String label) {
+    for (final o in values ?? const <CoreOption>[]) {
+      if (o.label == label) return o.id;
+    }
+    return null;
+  }
+
+  /// A blouse that exists gets a status, or nobody can tell an unstitched
+  /// blouse from one that was simply never asked about. Only fills a blank —
+  /// never overwrites a status someone already picked.
+  void applyBlouseStatusDefault(CoreOptions o) {
+    final withBlouse = labelOf(o, 'garment_type', attrs['garmentType']) == 'With Blouse';
+    final blank = attrs['blouseStatus'] == null || attrs['blouseStatus']!.isEmpty;
+    if (withBlouse && blank) {
+      attrs['blouseStatus'] = idForLabel(o['blouse_status'], 'Unstitched');
+    }
+  }
+
   List<PickerOption> pickOptions(List<CoreOption>? values) => [
         for (final o in values ?? const <CoreOption>[])
           PickerOption(o.id, o.label, color: o.swatch),
@@ -227,15 +251,54 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
         onFieldChanged();
       });
 
+  /// The Basic tab's own sub type picker — the same "With Blouse" default
+  /// [setProductType] applies also needs to fire here, since choosing the
+  /// sub type by hand is exactly how somebody arrives at "With Blouse" on a
+  /// record that started as something else.
+  void setGarmentType(CoreOptions o, String? v) => setState(() {
+        attrs['garmentType'] = v;
+        fieldErrors = {...fieldErrors}..remove('garmentType');
+        applyBlouseStatusDefault(o);
+        onFieldChanged();
+      });
+
+  /// Kalamkari is drawn or printed almost exclusively as Hand Screen — the
+  /// sub type starts there, same reasoning as the saree/blouse default
+  /// above, and the same "only on an actual change" guard so reopening the
+  /// technique picker without changing it never overwrites a deliberate
+  /// choice of, say, Hand Block.
+  void setCraftTechnique(CoreOptions o, String? v) => setState(() {
+        final chosen = optionOf(o, 'craft_technique', v);
+        final changed = attrs['craftTechnique'] != v;
+        attrs['craftTechnique'] = v;
+        if (changed && chosen?.label == 'Kalamkari') {
+          attrs['craftSubType'] = idForLabel(o['craft_sub_type'], 'Hand Screen');
+        }
+        fieldErrors = {...fieldErrors}..remove('craftTechnique');
+        onFieldChanged();
+      });
+
   /// Choosing a product type also answers how the thing is measured.
   void setProductType(CoreOptions o, String key, String? v) {
     final list = key == 'productType' ? 'product_type' : 'home_product_type';
     final chosen = optionOf(o, list, v);
+    final changedType = attrs[key] != v;
 
     setState(() {
       attrs[key] = v;
-      // A sub type belongs to the type above it.
-      if (key == 'productType') attrs['garmentType'] = null;
+      // A sub type belongs to the type above it, so a new type starts it
+      // over — but only when the type itself actually changed. The picker
+      // fires Done on a bare reconfirm too, and re-running this on every one
+      // of those would flip a saree somebody deliberately marked "Without
+      // Blouse" back to the default the moment its Product Type is reopened.
+      if (key == 'productType' && changedType) {
+        // Nearly every saree carries a blouse — the sub type starts there
+        // instead of making that the one pick almost everybody repeats.
+        attrs['garmentType'] = chosen?.label == 'Saree'
+            ? idForLabel(narrow(o['garment_type'], v), 'With Blouse')
+            : null;
+        applyBlouseStatusDefault(o);
+      }
       if (chosen?.soldById != null) attrs['uom'] = chosen!.soldById;
       fieldErrors = {...fieldErrors}
         ..remove('productType')
@@ -359,7 +422,7 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
                 allowClear: true,
                 options:
                     pickOptions(narrow(o['garment_type'], attrs['productType'])),
-                onChanged: (v) => setAttr('garmentType', v),
+                onChanged: (v) => setGarmentType(o, v),
               ),
             ),
         ],
@@ -499,27 +562,12 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
           ),
         ),
         RecordFieldWrap(
-          child: PickerField(
-            // A contrast pallu, a border that does not match. A description,
-            // not part of the identity — two records cannot differ by it alone.
-            label: 'Secondary colour',
-            value: secondaryColourId,
-            allowClear: true,
-            hint: 'None',
-            options: pickOptions(o['colour']),
-            onChanged: (v) => setState(() {
-              secondaryColourId = v;
-              onFieldChanged();
-            }),
-          ),
-        ),
-        RecordFieldWrap(
           error: fieldErrors['craftTechnique'],
           child: PickerField(
             label: 'Craft technique *',
             value: attrs['craftTechnique'],
             options: pickOptions(o['craft_technique']),
-            onChanged: (v) => setAttr('craftTechnique', v),
+            onChanged: (v) => setCraftTechnique(o, v),
           ),
         ),
         if (craft == 'Kalamkari')

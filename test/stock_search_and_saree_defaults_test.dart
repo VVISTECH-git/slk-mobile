@@ -187,6 +187,134 @@ void main() {
       },
     );
   });
+
+  group('Saree sub type defaults to With Blouse', () {
+    final options = <String, List<CoreOption>>{
+      'product_type': [
+        opt('saree', 'Saree', parent: 'clothing'),
+        opt('bedsheets', 'Bedsheets'),
+      ],
+      'garment_type': [
+        opt('with-blouse', 'With Blouse', parent: 'saree'),
+        opt('without-blouse', 'Without Blouse', parent: 'saree'),
+      ],
+      'blouse_status': [
+        opt('stitched', 'Stitched'),
+        opt('unstitched', 'Unstitched'),
+      ],
+    };
+
+    testWidgets('choosing Saree defaults the sub type to With Blouse',
+        (tester) async {
+      late _HarnessState fields;
+      await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+      await tester.pump();
+
+      fields.setProductType(options, 'productType', 'saree');
+      await tester.pump();
+
+      expect(fields.attrs['garmentType'], 'with-blouse');
+      // Nobody can tell an unstitched blouse from one nobody asked about —
+      // the default cascades all the way to Blouse status.
+      expect(fields.attrs['blouseStatus'], 'unstitched');
+    });
+
+    testWidgets(
+      'REGRESSION: re-confirming Saree does not overwrite a deliberate Without Blouse',
+      (tester) async {
+        late _HarnessState fields;
+        await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+        await tester.pump();
+
+        fields.attrs['productType'] = 'saree';
+        fields.attrs['garmentType'] = 'without-blouse';
+
+        fields.setProductType(options, 'productType', 'saree');
+        await tester.pump();
+
+        expect(fields.attrs['garmentType'], 'without-blouse');
+      },
+    );
+
+    testWidgets('picking the sub type by hand also defaults Blouse status',
+        (tester) async {
+      late _HarnessState fields;
+      await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+      await tester.pump();
+
+      fields.setGarmentType(options, 'with-blouse');
+      await tester.pump();
+
+      expect(fields.attrs['blouseStatus'], 'unstitched');
+    });
+
+    testWidgets('an already-chosen Blouse status is never overwritten',
+        (tester) async {
+      late _HarnessState fields;
+      await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+      await tester.pump();
+
+      fields.attrs['blouseStatus'] = 'stitched';
+      fields.setGarmentType(options, 'with-blouse');
+      await tester.pump();
+
+      expect(fields.attrs['blouseStatus'], 'stitched');
+    });
+  });
+
+  group('Kalamkari defaults Craft sub type to Hand Screen', () {
+    final options = <String, List<CoreOption>>{
+      'craft_technique': [
+        opt('kalamkari', 'Kalamkari'),
+        opt('block-print', 'Block Print'),
+      ],
+      'craft_sub_type': [
+        opt('hand-block', 'Hand Block'),
+        opt('hand-screen', 'Hand Screen'),
+      ],
+    };
+
+    testWidgets('choosing Kalamkari defaults the sub type to Hand Screen',
+        (tester) async {
+      late _HarnessState fields;
+      await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+      await tester.pump();
+
+      fields.setCraftTechnique(options, 'kalamkari');
+      await tester.pump();
+
+      expect(fields.attrs['craftSubType'], 'hand-screen');
+    });
+
+    testWidgets(
+      'REGRESSION: re-confirming Kalamkari does not overwrite a deliberate Hand Block',
+      (tester) async {
+        late _HarnessState fields;
+        await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+        await tester.pump();
+
+        fields.attrs['craftTechnique'] = 'kalamkari';
+        fields.attrs['craftSubType'] = 'hand-block';
+
+        fields.setCraftTechnique(options, 'kalamkari');
+        await tester.pump();
+
+        expect(fields.attrs['craftSubType'], 'hand-block');
+      },
+    );
+
+    testWidgets('a technique other than Kalamkari never sets a sub type',
+        (tester) async {
+      late _HarnessState fields;
+      await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+      await tester.pump();
+
+      fields.setCraftTechnique(options, 'block-print');
+      await tester.pump();
+
+      expect(fields.attrs['craftSubType'], isNull);
+    });
+  });
 }
 
 /// Minimal StatefulWidget wired to the mixin under test, so `setProductType`
