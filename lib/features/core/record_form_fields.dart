@@ -240,6 +240,18 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
     }
   }
 
+  /// A saree's motif almost always runs the same across body, pallu and
+  /// border — asking three times for what is usually one answer. Echoes
+  /// [motifId] into whichever of the three are still blank; a part that
+  /// already carries its own motif keeps it.
+  void applyMotifCascade(String? motifId) {
+    if (motifId == null) return;
+    for (final key in ['sareeBodyMotif', 'palluMotif', 'borderMotif']) {
+      final blank = attrs[key] == null || attrs[key]!.isEmpty;
+      if (blank) attrs[key] = motifId;
+    }
+  }
+
   List<PickerOption> pickOptions(List<CoreOption>? values) => [
         for (final o in values ?? const <CoreOption>[])
           PickerOption(o.id, o.label, color: o.swatch),
@@ -259,6 +271,26 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
         attrs['garmentType'] = v;
         fieldErrors = {...fieldErrors}..remove('garmentType');
         applyBlouseStatusDefault(o);
+        onFieldChanged();
+      });
+
+  /// Craft & Design's own motif — the one a hand-painted piece is actually
+  /// designed around — is what Saree body motif, Pallu motif and Border
+  /// motif almost always repeat, so picking it here answers all three at
+  /// once instead of asking a fourth time on the Details tab.
+  void setMotif(String? v) => setState(() {
+        attrs['motif'] = v;
+        applyMotifCascade(v);
+        onFieldChanged();
+      });
+
+  /// Picking Saree body motif directly — instead of inheriting it from
+  /// Craft & Design's motif — still answers Pallu and Border the same way,
+  /// for the same reason: one motif, run through the whole piece, is the
+  /// common case.
+  void setSareeBodyMotif(String? v) => setState(() {
+        attrs['sareeBodyMotif'] = v;
+        applyMotifCascade(v);
         onFieldChanged();
       });
 
@@ -298,6 +330,15 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
             ? idForLabel(narrow(o['garment_type'], v), 'With Blouse')
             : null;
         applyBlouseStatusDefault(o);
+
+        // Nearly every saree is woven or printed the same across its whole
+        // length — "All over" — rather than in the panelled layouts that
+        // are the exception. Only fills a blank, since sareeStyle is never
+        // reset above the way garmentType is.
+        if (chosen?.label == 'Saree' &&
+            (attrs['sareeStyle'] == null || attrs['sareeStyle']!.isEmpty)) {
+          attrs['sareeStyle'] = idForLabel(o['saree_style'], 'All over');
+        }
       }
       if (chosen?.soldById != null) attrs['uom'] = chosen!.soldById;
       fieldErrors = {...fieldErrors}
@@ -602,7 +643,7 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
                 ? 'Pick a category first'
                 : 'Select',
             options: pickOptions(narrow(o['motif'], attrs['motifCategory'])),
-            onChanged: (v) => setAttr('motif', v),
+            onChanged: (v) => setMotif(v),
           ),
         ),
       ],
@@ -634,7 +675,7 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
               value: attrs['sareeBodyMotif'],
               allowClear: true,
               options: pickOptions(o['motif']),
-              onChanged: (v) => setAttr('sareeBodyMotif', v),
+              onChanged: (v) => setSareeBodyMotif(v),
             ),
           ),
           RecordFieldWrap(

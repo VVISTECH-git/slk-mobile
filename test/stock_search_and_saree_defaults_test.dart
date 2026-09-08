@@ -315,6 +315,111 @@ void main() {
       expect(fields.attrs['craftSubType'], isNull);
     });
   });
+
+  group('Saree defaults to All over', () {
+    final options = <String, List<CoreOption>>{
+      'product_type': [
+        opt('saree', 'Saree', parent: 'clothing'),
+        opt('bedsheets', 'Bedsheets'),
+      ],
+      'saree_style': [
+        opt('all-over', 'All over'),
+        opt('panelled', 'Panelled'),
+      ],
+    };
+
+    testWidgets('choosing Saree defaults Saree style to All over',
+        (tester) async {
+      late _HarnessState fields;
+      await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+      await tester.pump();
+
+      fields.setProductType(options, 'productType', 'saree');
+      await tester.pump();
+
+      expect(fields.attrs['sareeStyle'], 'all-over');
+    });
+
+    testWidgets(
+      'REGRESSION: re-confirming Saree does not overwrite a deliberate Panelled',
+      (tester) async {
+        late _HarnessState fields;
+        await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+        await tester.pump();
+
+        fields.attrs['productType'] = 'saree';
+        fields.attrs['sareeStyle'] = 'panelled';
+
+        fields.setProductType(options, 'productType', 'saree');
+        await tester.pump();
+
+        expect(fields.attrs['sareeStyle'], 'panelled');
+      },
+    );
+  });
+
+  group('Saree motif cascades from Craft & Design to body, pallu and border', () {
+    testWidgets('picking Craft & Design\'s Motif fills all three blanks',
+        (tester) async {
+      late _HarnessState fields;
+      await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+      await tester.pump();
+
+      fields.setMotif('peacock');
+      await tester.pump();
+
+      expect(fields.attrs['motif'], 'peacock');
+      expect(fields.attrs['sareeBodyMotif'], 'peacock');
+      expect(fields.attrs['palluMotif'], 'peacock');
+      expect(fields.attrs['borderMotif'], 'peacock');
+    });
+
+    testWidgets('a motif already chosen for one part is left alone',
+        (tester) async {
+      late _HarnessState fields;
+      await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+      await tester.pump();
+
+      fields.attrs['borderMotif'] = 'floral';
+
+      fields.setMotif('peacock');
+      await tester.pump();
+
+      expect(fields.attrs['sareeBodyMotif'], 'peacock');
+      expect(fields.attrs['palluMotif'], 'peacock');
+      expect(fields.attrs['borderMotif'], 'floral');
+    });
+
+    testWidgets(
+      'picking Saree body motif directly cascades to Pallu and Border too',
+      (tester) async {
+        late _HarnessState fields;
+        await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+        await tester.pump();
+
+        fields.setSareeBodyMotif('lotus');
+        await tester.pump();
+
+        expect(fields.attrs['palluMotif'], 'lotus');
+        expect(fields.attrs['borderMotif'], 'lotus');
+      },
+    );
+
+    testWidgets('clearing Craft & Design\'s Motif touches nothing else',
+        (tester) async {
+      late _HarnessState fields;
+      await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+      await tester.pump();
+
+      fields.attrs['sareeBodyMotif'] = 'lotus';
+
+      fields.setMotif(null);
+      await tester.pump();
+
+      expect(fields.attrs['motif'], isNull);
+      expect(fields.attrs['sareeBodyMotif'], 'lotus');
+    });
+  });
 }
 
 /// Minimal StatefulWidget wired to the mixin under test, so `setProductType`
