@@ -84,10 +84,15 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
     } catch (e) {
       if (mounted) setState(() => _problem = '$e');
     } finally {
-      if (mounted) setState(() => _busy = false);
-      _field.clear();
-      // Ready for the next scan without anybody tapping the field again.
-      _focus.requestFocus();
+      // Backing out of Stock Records mid-lookup disposes both of these —
+      // touching them after that throws, so the guard has to cover them too,
+      // not just the setState above.
+      if (mounted) {
+        setState(() => _busy = false);
+        _field.clear();
+        // Ready for the next scan without anybody tapping the field again.
+        _focus.requestFocus();
+      }
     }
   }
 

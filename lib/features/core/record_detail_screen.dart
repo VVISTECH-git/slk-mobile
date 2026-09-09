@@ -955,22 +955,25 @@ class _RecordMovementFormState extends ConsumerState<_RecordMovementForm> {
       );
 
       _key = null;
+      // The controllers this touches are disposed the moment somebody backs
+      // out of the record mid-request — a slow warehouse connection makes
+      // that easy to hit — and clearing a disposed TextEditingController
+      // throws.
+      if (!mounted) return;
       _qty.clear();
       _reference.clear();
       _note.clear();
-      if (mounted) {
-        setState(() {
-          _locationId = null;
-          _toLocationId = null;
-        });
-      }
+      setState(() {
+        _locationId = null;
+        _toLocationId = null;
+      });
 
       final message = (data as Map)['message'] as String? ?? 'Recorded.';
       widget.onRecorded(message);
     } on ApiException catch (e) {
-      setState(() => _error = e.message);
+      if (mounted) setState(() => _error = e.message);
     } catch (e) {
-      setState(() => _error = '$e');
+      if (mounted) setState(() => _error = '$e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }

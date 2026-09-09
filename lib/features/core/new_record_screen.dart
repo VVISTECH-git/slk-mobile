@@ -213,15 +213,25 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
     if (source == null || !mounted) return;
 
     // Same limits RecordPhotosScreen uses on the file it eventually sends.
-    final picked = await ImagePicker().pickImage(
-      source: source,
-      maxWidth: 1600,
-      maxHeight: 1600,
-      imageQuality: 80,
-    );
+    final XFile? picked;
+    try {
+      picked = await ImagePicker().pickImage(
+        source: source,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 80,
+      );
+    } catch (e) {
+      // The camera denied, a permission dialog dismissed — image_picker
+      // throws rather than returning null, and with nothing catching it
+      // that used to close the sheet with no visible reason why.
+      if (mounted) showError(context, e);
+      return;
+    }
     if (picked == null || !mounted) return;
 
-    setState(() => _capturedPhotos[slot.id] = File(picked.path));
+    final file = File(picked.path);
+    setState(() => _capturedPhotos[slot.id] = file);
   }
 
   void _removeCapturedPhoto(CoreOption slot) =>
@@ -540,6 +550,23 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
                                   'Saree') {
                             imageSlots =
                                 sareeDefaultImageSlots(opts, productTypeId);
+                            // Sub type, Blouse status and Saree style all
+                            // default the same way setProductType applies
+                            // them — see applySareeExtras's own comment for
+                            // why this call has to exist separately.
+                            applySareeExtras(opts, productTypeId);
+                          }
+
+                          // Kalamkari is also the vocabulary's own default
+                          // craft technique, so this needs the same
+                          // separate call setCraftTechnique's comment
+                          // explains — the picker never fires for a type
+                          // the form simply opened on.
+                          final craftTechniqueId = attrs['craftTechnique'];
+                          if (craftTechniqueId != null &&
+                              labelOf(opts, 'craft_technique', craftTechniqueId) ==
+                                  'Kalamkari') {
+                            applyCraftTechniqueExtras(opts);
                           }
                         }
                       }

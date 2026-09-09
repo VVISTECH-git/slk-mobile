@@ -86,14 +86,24 @@ class _RecordPhotosScreenState extends ConsumerState<RecordPhotosScreen> {
   void _refresh() => setState(() => _slots = _load());
 
   Future<void> _pick(_Slot slot, ImageSource source) async {
-    final picked = await ImagePicker().pickImage(
-      source: source,
-      // The same limits the rest of the app uses. A 12MP original is refused
-      // by the API at 12MB anyway, and nothing downstream wants the pixels.
-      maxWidth: 1600,
-      maxHeight: 1600,
-      imageQuality: 80,
-    );
+    final XFile? picked;
+    try {
+      picked = await ImagePicker().pickImage(
+        source: source,
+        // The same limits the rest of the app uses. A 12MP original is
+        // refused by the API at 12MB anyway, and nothing downstream wants
+        // the pixels.
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 80,
+      );
+    } catch (e) {
+      // The camera denied, a permission dialog dismissed — image_picker
+      // throws rather than returning null, and with nothing catching it
+      // that used to close the sheet with no visible reason why.
+      if (mounted) showError(context, e);
+      return;
+    }
 
     if (picked == null || !mounted) return;
 

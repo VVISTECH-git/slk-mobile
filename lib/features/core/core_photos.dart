@@ -102,6 +102,13 @@ class CorePhotos {
         },
         // The signed URL is not the API, so the envelope rules do not apply.
         validateStatus: (status) => status != null && status >= 200 && status < 300,
+        // Left unset, a dropped connection mid-upload never resolves either
+        // way — the "Sending…" spinner in RecordPhotosScreen just sits there
+        // with nothing to catch and no way to retry. Send gets longer than
+        // ApiClient's own 25s since this carries the actual file, not a
+        // small JSON body.
+        connectTimeout: const Duration(seconds: 25),
+        sendTimeout: const Duration(seconds: 60),
       ),
     );
 

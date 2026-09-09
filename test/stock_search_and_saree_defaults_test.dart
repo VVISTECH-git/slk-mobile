@@ -200,7 +200,9 @@ void main() {
       ],
       'blouse_status': [
         opt('stitched', 'Stitched'),
-        opt('unstitched', 'Unstitched'),
+        // The vocabulary's own spelling — a plain "Unstitched" is not what
+        // production actually calls it.
+        opt('unstitched', 'UnStitched'),
       ],
     };
 
@@ -260,6 +262,34 @@ void main() {
 
       expect(fields.attrs['blouseStatus'], 'stitched');
     });
+
+    testWidgets(
+      'REGRESSION: a record that opens already defaulted to Saree still gets '
+      'With Blouse, All Over and UnStitched',
+      (tester) async {
+        // defaultAttributes() writes attrs['productType'] directly — same as
+        // the image-slots regression above — so NewRecordScreen calls
+        // applySareeExtras itself rather than relying on setProductType,
+        // which never runs when Saree is only ever the vocabulary's own
+        // default and nobody touches the picker.
+        final withStyle = <String, List<CoreOption>>{
+          ...options,
+          'saree_style': [opt('all-over', 'All Over'), opt('panelled', 'Panelled')],
+        };
+
+        late _HarnessState fields;
+        await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+        await tester.pump();
+
+        fields.attrs['productType'] = 'saree';
+        fields.applySareeExtras(withStyle, 'saree');
+        await tester.pump();
+
+        expect(fields.attrs['garmentType'], 'with-blouse');
+        expect(fields.attrs['blouseStatus'], 'unstitched');
+        expect(fields.attrs['sareeStyle'], 'all-over');
+      },
+    );
   });
 
   group('Kalamkari defaults Craft sub type to Hand Screen', () {
@@ -314,21 +344,43 @@ void main() {
 
       expect(fields.attrs['craftSubType'], isNull);
     });
+
+    testWidgets(
+      'REGRESSION: a record that opens already defaulted to Kalamkari still '
+      'gets Hand Screen',
+      (tester) async {
+        // Kalamkari is also the vocabulary's own default craft technique —
+        // defaultAttributes() writes attrs['craftTechnique'] directly, so
+        // NewRecordScreen calls applyCraftTechniqueExtras itself rather than
+        // relying on setCraftTechnique, which never runs when nobody
+        // touches the picker.
+        late _HarnessState fields;
+        await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+        await tester.pump();
+
+        fields.attrs['craftTechnique'] = 'kalamkari';
+        fields.applyCraftTechniqueExtras(options);
+        await tester.pump();
+
+        expect(fields.attrs['craftSubType'], 'hand-screen');
+      },
+    );
   });
 
-  group('Saree defaults to All over', () {
+  group('Saree defaults to All Over', () {
     final options = <String, List<CoreOption>>{
       'product_type': [
         opt('saree', 'Saree', parent: 'clothing'),
         opt('bedsheets', 'Bedsheets'),
       ],
       'saree_style': [
-        opt('all-over', 'All over'),
+        // The vocabulary's own capitalisation — "All over" matches nothing.
+        opt('all-over', 'All Over'),
         opt('panelled', 'Panelled'),
       ],
     };
 
-    testWidgets('choosing Saree defaults Saree style to All over',
+    testWidgets('choosing Saree defaults Saree style to All Over',
         (tester) async {
       late _HarnessState fields;
       await tester.pumpWidget(_Harness(onReady: (f) => fields = f));

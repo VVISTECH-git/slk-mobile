@@ -236,7 +236,9 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
     final withBlouse = labelOf(o, 'garment_type', attrs['garmentType']) == 'With Blouse';
     final blank = attrs['blouseStatus'] == null || attrs['blouseStatus']!.isEmpty;
     if (withBlouse && blank) {
-      attrs['blouseStatus'] = idForLabel(o['blouse_status'], 'Unstitched');
+      // The vocabulary's own spelling — confirmed against production, where
+      // a plain "Unstitched" silently matches nothing.
+      attrs['blouseStatus'] = idForLabel(o['blouse_status'], 'UnStitched');
     }
   }
 
@@ -295,20 +297,56 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
       });
 
   /// Kalamkari is drawn or printed almost exclusively as Hand Screen — the
-  /// sub type starts there, same reasoning as the saree/blouse default
-  /// above, and the same "only on an actual change" guard so reopening the
-  /// technique picker without changing it never overwrites a deliberate
-  /// choice of, say, Hand Block.
+  /// sub type starts there. Pulled out, same reason [applySareeExtras] is:
+  /// Kalamkari is also the vocabulary's own default craft technique, so a
+  /// brand-new record opens already on it without [setCraftTechnique] ever
+  /// running — [NewRecordScreen]'s own defaults application calls this
+  /// directly to close that gap. Only fills a blank; never overwrites a
+  /// deliberate choice of, say, Hand Block.
+  void applyCraftTechniqueExtras(CoreOptions o) {
+    if (attrs['craftSubType'] == null || attrs['craftSubType']!.isEmpty) {
+      attrs['craftSubType'] = idForLabel(o['craft_sub_type'], 'Hand Screen');
+    }
+  }
+
+  /// The "only on an actual change" guard so reopening the technique picker
+  /// without changing it never overwrites a deliberate choice already made.
   void setCraftTechnique(CoreOptions o, String? v) => setState(() {
         final chosen = optionOf(o, 'craft_technique', v);
         final changed = attrs['craftTechnique'] != v;
         attrs['craftTechnique'] = v;
         if (changed && chosen?.label == 'Kalamkari') {
-          attrs['craftSubType'] = idForLabel(o['craft_sub_type'], 'Hand Screen');
+          applyCraftTechniqueExtras(o);
         }
         fieldErrors = {...fieldErrors}..remove('craftTechnique');
         onFieldChanged();
       });
+
+  /// Every extra a fresh Saree gets beyond the plain product type — sub
+  /// type, its own Blouse-status cascade, and Saree style — pulled out so
+  /// both the moment somebody actively picks Saree ([setProductType]) and
+  /// the moment a brand-new record simply opens already defaulted to it
+  /// ([NewRecordScreen]'s own defaults application, which never calls
+  /// setProductType at all — the same gap [sareeDefaultImageSlots] exists
+  /// to close for the image slots) apply the exact same defaults. Only
+  /// fills blanks; never overwrites an answer already there.
+  void applySareeExtras(CoreOptions o, String productTypeId) {
+    // Nearly every saree carries a blouse — the sub type starts there
+    // instead of making that the one pick almost everybody repeats.
+    if (attrs['garmentType'] == null || attrs['garmentType']!.isEmpty) {
+      attrs['garmentType'] =
+          idForLabel(narrow(o['garment_type'], productTypeId), 'With Blouse');
+    }
+    applyBlouseStatusDefault(o);
+
+    // Nearly every saree is woven or printed the same across its whole
+    // length — "All Over" — rather than in the panelled layouts that are
+    // the exception. The vocabulary's own capitalisation, confirmed against
+    // production — "All over" silently matches nothing.
+    if (attrs['sareeStyle'] == null || attrs['sareeStyle']!.isEmpty) {
+      attrs['sareeStyle'] = idForLabel(o['saree_style'], 'All Over');
+    }
+  }
 
   /// Choosing a product type also answers how the thing is measured.
   void setProductType(CoreOptions o, String key, String? v) {
@@ -324,21 +362,8 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
       // of those would flip a saree somebody deliberately marked "Without
       // Blouse" back to the default the moment its Product Type is reopened.
       if (key == 'productType' && changedType) {
-        // Nearly every saree carries a blouse — the sub type starts there
-        // instead of making that the one pick almost everybody repeats.
-        attrs['garmentType'] = chosen?.label == 'Saree'
-            ? idForLabel(narrow(o['garment_type'], v), 'With Blouse')
-            : null;
-        applyBlouseStatusDefault(o);
-
-        // Nearly every saree is woven or printed the same across its whole
-        // length — "All over" — rather than in the panelled layouts that
-        // are the exception. Only fills a blank, since sareeStyle is never
-        // reset above the way garmentType is.
-        if (chosen?.label == 'Saree' &&
-            (attrs['sareeStyle'] == null || attrs['sareeStyle']!.isEmpty)) {
-          attrs['sareeStyle'] = idForLabel(o['saree_style'], 'All over');
-        }
+        attrs['garmentType'] = null;
+        if (v != null && chosen?.label == 'Saree') applySareeExtras(o, v);
       }
       if (chosen?.soldById != null) attrs['uom'] = chosen!.soldById;
       fieldErrors = {...fieldErrors}
