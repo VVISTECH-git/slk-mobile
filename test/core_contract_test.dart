@@ -209,6 +209,69 @@ void main() {
     });
   });
 
+  group('CoreRecordRow', () {
+    // GET /api/v1/records — one row, verbatim.
+    final row = <String, dynamic>{
+      'id': '9b1a3c9e-2f6a-4b6a-8f2f-9a3b8f2f9a3b',
+      'code': 'SAR-GEN-COT-0001',
+      'name': 'Kalamkari Cotton Saree',
+      'colour': 'Beige',
+      'colourHex': '#E8DCB5',
+      'productType': 'Saree',
+      'fibreType': 'Cotton',
+      'craftTechnique': 'Kalamkari',
+      'uom': 'Piece',
+      'productCode': '300021',
+      'quantity': 2,
+      'pieces': 2,
+      'isSerialised': true,
+      'priceMinor': 9900,
+      'sold': 5,
+      'syncStatus': 'synced',
+    };
+
+    test('parses a row', () {
+      final parsed = CoreRecordRow.fromJson(row);
+
+      expect(parsed.sold, 5);
+      expect(parsed.syncStatus, CoreSyncStatus.synced);
+    });
+
+    test('a sold count arriving as a string is still a count', () {
+      // The same bigint-through-db.execute shape CorePiece's price guards
+      // against — sum(qty) is bigint before the query casts it down.
+      expect(CoreRecordRow.fromJson({...row, 'sold': '5'}).sold, 5);
+    });
+
+    test('never sold reads as zero, not null', () {
+      expect(CoreRecordRow.fromJson({...row, 'sold': 0}).sold, 0);
+    });
+
+    for (final status in ['none', 'pending', 'synced', 'error']) {
+      test('syncStatus "$status" round-trips', () {
+        expect(
+          CoreRecordRow.fromJson({...row, 'syncStatus': status}).syncStatus,
+          CoreSyncStatus.values.byName(status),
+        );
+      });
+    }
+
+    test('an unrecognised syncStatus reads as none rather than crashing', () {
+      // Server and client vocabularies for this need not release in
+      // lockstep — a value neither side has agreed on yet should read as
+      // "nothing to report", not take the list down.
+      expect(
+        CoreRecordRow.fromJson({...row, 'syncStatus': 'relisted'}).syncStatus,
+        CoreSyncStatus.none,
+      );
+    });
+
+    test('a missing syncStatus (an older API) also reads as none', () {
+      final withoutStatus = {...row}..remove('syncStatus');
+      expect(CoreRecordRow.fromJson(withoutStatus).syncStatus, CoreSyncStatus.none);
+    });
+  });
+
   group('CoreLocation', () {
     // GET /api/v1/locations — verbatim, in the order the API returns.
     final locations = [

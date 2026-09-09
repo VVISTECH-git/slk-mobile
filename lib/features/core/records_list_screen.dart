@@ -385,20 +385,41 @@ class _Row extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(
-                    record.price,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Nothing drawn for "none" — a record with no
+                      // consignment yet, or one nobody has tried to publish,
+                      // has nothing here worth a person's attention.
+                      if (_syncIcon(record.syncStatus) != null) ...[
+                        Icon(
+                          _syncIcon(record.syncStatus),
+                          size: 13,
+                          color: _syncColor(record.syncStatus, p),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      Text(
+                        record.price,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 2),
                   Text(
                     // "6 Piece" reads oddly; "6 in stock" is what is meant, and
                     // the unit only earns its place where it is not the Piece.
-                    record.uom == null || record.uom == 'Piece'
-                        ? '${record.quantity} in stock'
-                        : '${record.quantity} ${record.uom}',
+                    // Sold trails on only once there is one to report — a
+                    // record that has never sold says nothing extra.
+                    [
+                      record.uom == null || record.uom == 'Piece'
+                          ? '${record.quantity} in stock'
+                          : '${record.quantity} ${record.uom}',
+                      if (record.sold > 0) '${record.sold} sold',
+                    ].join(' · '),
                     style: TextStyle(
                       fontSize: 12,
                       color: record.quantity > 0 ? p.success : p.textMuted,
@@ -412,4 +433,20 @@ class _Row extends StatelessWidget {
       ),
     );
   }
+
+  /// Null for [CoreSyncStatus.none] — nothing to draw, not a placeholder.
+  IconData? _syncIcon(CoreSyncStatus status) => switch (status) {
+        CoreSyncStatus.none => null,
+        CoreSyncStatus.pending => Icons.cloud_upload_outlined,
+        CoreSyncStatus.synced => Icons.cloud_done_outlined,
+        CoreSyncStatus.error => Icons.cloud_off_outlined,
+      };
+
+  // No amber in the palette yet — primary stands in for "in progress" the
+  // same way it already does for the product code text above.
+  Color _syncColor(CoreSyncStatus status, AppPalette p) => switch (status) {
+        CoreSyncStatus.error => p.danger,
+        CoreSyncStatus.pending => p.primary,
+        _ => p.success,
+      };
 }

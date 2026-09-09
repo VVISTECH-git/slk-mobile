@@ -16,6 +16,8 @@ CoreRecordRow row({
       quantity: 2,
       pieces: 2,
       isSerialised: true,
+      sold: 0,
+      syncStatus: CoreSyncStatus.none,
     );
 
 CorePiece piece({

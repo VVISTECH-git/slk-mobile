@@ -167,6 +167,8 @@ class CoreRecordRow {
     required this.pieces,
     required this.isSerialised,
     this.priceMinor,
+    required this.sold,
+    required this.syncStatus,
   });
 
   final String id;
@@ -202,6 +204,15 @@ class CoreRecordRow {
   /// Retail, in paise. Null means unpriced, which is not the same as free.
   final int? priceMinor;
 
+  /// Every "sold" movement against this colourway, summed from the ledger —
+  /// not a count Shopify itself is asked for.
+  final int sold;
+
+  /// Whether the newest consignment is listed on Shopify — the same
+  /// per-batch fact the Publish tab shows for one record at a time, echoed
+  /// here so the list doesn't hide it behind a tap.
+  final CoreSyncStatus syncStatus;
+
   Color? get swatch => _swatchOf(colourHex);
 
   String get price => _rupees(priceMinor);
@@ -232,7 +243,36 @@ class CoreRecordRow {
         pieces: _intOf(json['pieces']) ?? 0,
         isSerialised: json['isSerialised'] == true,
         priceMinor: _intOf(json['priceMinor']),
+        sold: _intOf(json['sold']) ?? 0,
+        syncStatus: CoreSyncStatus.fromJson(json['syncStatus'] as String?),
       );
+}
+
+/// Whether a record's newest consignment is listed on Shopify.
+///
+/// [fromJson] falls back to [none] for anything it doesn't recognise —
+/// server and client vocabularies for this need not release in lockstep,
+/// and an unfamiliar status should read as "nothing to report" rather than
+/// crash the list that shows it.
+enum CoreSyncStatus {
+  /// Nobody has ever tried to publish this consignment, on any channel.
+  none,
+
+  /// Tried on some channels but not all.
+  pending,
+
+  /// Listed everywhere it has been tried, with nothing outstanding.
+  synced,
+
+  /// The most recent attempt on at least one channel failed.
+  error;
+
+  factory CoreSyncStatus.fromJson(String? value) => switch (value) {
+        'pending' => CoreSyncStatus.pending,
+        'synced' => CoreSyncStatus.synced,
+        'error' => CoreSyncStatus.error,
+        _ => CoreSyncStatus.none,
+      };
 }
 
 /// A record with photographs still to take.
