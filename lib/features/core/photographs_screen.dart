@@ -185,13 +185,13 @@ class _Empty extends StatelessWidget {
   }
 }
 
-class _Row extends StatelessWidget {
+class _Row extends ConsumerWidget {
   const _Row({required this.row});
 
   final CoreShotListRow row;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final p = context.p;
     final swatch = row.swatch;
 
@@ -207,10 +207,18 @@ class _Row extends StatelessWidget {
         // The same screen the catalogue opens, and the same fallback: the
         // product code where one exists, the design code only where nothing
         // has arrived yet.
-        onTap: () => context.push(
-          '/core/records/${row.id}/photos'
-          '?code=${Uri.encodeComponent(row.productCode ?? row.designCode)}',
-        ),
+        //
+        // Refetched on the way back. autoDispose alone never fires here:
+        // this list keeps watching the provider underneath the pushed
+        // screen, so a slot photographed there stayed listed until somebody
+        // pulled to refresh — on the one screen whose job is reaching empty.
+        onTap: () async {
+          await context.push(
+            '/core/records/${row.id}/photos'
+            '?code=${Uri.encodeComponent(row.productCode ?? row.designCode)}',
+          );
+          if (context.mounted) ref.invalidate(coreShotListProvider);
+        },
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(

@@ -168,12 +168,16 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
         screen that could not repeat it back would be the one place that
         does not warn anyone.
       */
+      // The server's own sentence leads — "Saved. Stock adjusted by +3." —
+      // because a count correction is the one edit here whose effect the
+      // person cannot see on the form they just typed into.
+      final saved = answer['message'] as String? ?? 'Saved.';
       final also = answer['alsoChanged'] as int?;
       showOk(
         context,
         also == null || also == 0
-            ? 'Saved.'
-            : 'Saved. Also changed on $also other colour${also == 1 ? '' : 's'}.',
+            ? saved
+            : '$saved Also changed on $also other colour${also == 1 ? '' : 's'}.',
       );
 
       _quantity.clear();

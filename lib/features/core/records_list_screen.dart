@@ -57,6 +57,14 @@ CoreRecordRow? matchingRowForPiece(List<CoreRecordRow> rows, CorePiece piece) {
 /// piece that arrived in a consignment), the design code otherwise.
 String fallbackSearchFor(CorePiece piece) => piece.productCode ?? piece.designCode;
 
+/// Whether what somebody typed is a number off a label — an item code
+/// (500066) or a product code (300032), six digits either way — rather than
+/// a word or a design code. Those never appear in [CoreRecordRow.haystack]
+/// (a row carries only its newest consignment's code, and no item codes at
+/// all), so typing one used to read "Nothing matches" while scanning the
+/// same label worked. This is what lets the typed path resolve the same way.
+bool looksLikeLabelCode(String query) => RegExp(r'^\d{6}$').hasMatch(query.trim());
+
 /// The catalogue, on a phone.
 ///
 /// One row per colourway — the sellable line — which is the same grain the web
@@ -99,6 +107,25 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
     );
     if (code == null || !mounted) return;
 
+    await _resolveCode(code);
+  }
+
+  /// A six-digit code typed into the search box, submitted with the
+  /// keyboard's search key. The phone-side filter cannot answer it (see
+  /// [looksLikeLabelCode]), so it goes the way a scan goes — but only when
+  /// the filter really came up empty, so a product code that *is* a row's
+  /// newest consignment still just filters like any other search.
+  void _lookUpTyped() {
+    final typed = _search.text.trim();
+    if (!looksLikeLabelCode(typed)) return;
+
+    final rows = ref.read(coreRecordsProvider).valueOrNull ?? const [];
+    if (rows.any((r) => r.haystack.contains(typed.toLowerCase()))) return;
+
+    _resolveCode(typed);
+  }
+
+  Future<void> _resolveCode(String code) async {
     setState(() => _resolving = true);
     try {
       final data = await ref.read(coreApiProvider).get('/pieces/$code');
@@ -119,7 +146,8 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
       if (!mounted) return;
 
       if (match != null) {
-        context.push('/core/records/${match.id}');
+        await context.push('/core/records/${match.id}');
+        if (mounted) ref.invalidate(coreRecordsProvider);
       } else {
         final fallback = fallbackSearchFor(piece);
         setState(() {
@@ -163,7 +191,13 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
           IconButton(
             tooltip: 'New record',
             icon: const Icon(Icons.add),
-            onPressed: () => context.push('/core/records/new'),
+            // Refetched on the way back — see _Row for why autoDispose alone
+            // never does this here. Filing a record and then not finding it
+            // in the list you filed it from was the whole bug.
+            onPressed: () async {
+              await context.push('/core/records/new');
+              if (mounted) ref.invalidate(coreRecordsProvider);
+            },
           ),
         ],
       ),
@@ -174,6 +208,8 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
             child: TextField(
               controller: _search,
               onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _lookUpTyped(),
               decoration: InputDecoration(
                 hintText: 'Code, name, colour, consignment…',
                 prefixIcon: const Icon(Icons.search),
@@ -241,6 +277,22 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
                                       fontSize: 12, color: p.textMuted),
                                 ),
                               ],
+                              // A label's number, not a word — the filter
+                              // was never going to find it. Offer the
+                              // lookup a scan would have done.
+                              if (rows.isNotEmpty &&
+                                  looksLikeLabelCode(_search.text.trim())) ...[
+                                const SizedBox(height: 14),
+                                FilledButton.tonalIcon(
+                                  onPressed: _resolving
+                                      ? null
+                                      : () => _resolveCode(_search.text.trim()),
+                                  icon: const Icon(Icons.qr_code_2, size: 18),
+                                  label: Text(
+                                    'Look up ${_search.text.trim()} as a label code',
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         );
@@ -274,13 +326,13 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
   }
 }
 
-class _Row extends StatelessWidget {
+class _Row extends ConsumerWidget {
   const _Row({required this.record});
 
   final CoreRecordRow record;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final p = context.p;
     final swatch = record.swatch;
 
@@ -296,7 +348,16 @@ class _Row extends StatelessWidget {
         // The record, whole — every field the create form asks, seeded and
         // open to correction. Photographs are one tap from there, not
         // the destination in themselves.
-        onTap: () => context.push('/core/records/${record.id}'),
+        //
+        // Refetched on the way back. The provider is autoDispose, but that
+        // only fires once nothing is listening — and this list goes on
+        // listening underneath the pushed screen, so a price or count saved
+        // there came back to a row still showing the old one. Pull-to-refresh
+        // was the only way out, and nobody knew to.
+        onTap: () async {
+          await context.push('/core/records/${record.id}');
+          if (context.mounted) ref.invalidate(coreRecordsProvider);
+        },
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(

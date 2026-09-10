@@ -406,6 +406,11 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
     _draftSaveTimer?.cancel();
     ProductDraftStore.instance.clear();
     setState(() {
+      // The banner offering to resume goes with the store it read from. Left
+      // up, Continue would pour the record just filed — colour, price and
+      // opening stock included — back into a form now set up for the next
+      // one, and Create would file it twice.
+      _pendingDraft = null;
       // The save that key named is finished. The next record is a new intent
       // and gets a new name; keeping this one would make it a "duplicate" of
       // the record just created and be refused.

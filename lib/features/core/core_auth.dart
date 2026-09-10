@@ -44,7 +44,10 @@ final coreApiProvider = Provider<ApiClient>((ref) {
     readToken: _coreToken,
     onUnauthorized: () {
       try {
-        ref.read(coreAuthProvider.notifier).signOut();
+        // The token is already dead — asking the server to revoke it would
+        // answer 401 too, land right back here, and loop until the app
+        // died. Forget it locally and stop.
+        ref.read(coreAuthProvider.notifier).signOut(revoke: false);
       } catch (_) {}
     },
   );
@@ -152,7 +155,7 @@ class CoreAuth extends Notifier<CoreAuthState> {
 
       state = CoreAuthState(status: CoreAuthStatus.signedIn, actor: actor);
     } on ApiException catch (e) {
-      if (e.isUnauthorized) await signOut();
+      if (e.isUnauthorized) await signOut(revoke: false);
       // Anything else — no signal, server down — leaves the cached actor in
       // place. Being offline is not being signed out, and a warehouse has
       // patchy signal.
@@ -205,10 +208,16 @@ class CoreAuth extends Notifier<CoreAuthState> {
   /// The server call revokes this handset's token so a copied one is dead
   /// rather than merely gone from this phone — but it is allowed to fail.
   /// Signing out with no signal must still sign you out.
-  Future<void> signOut() async {
-    try {
-      await _api.post('/auth/logout');
-    } catch (_) {}
+  ///
+  /// [revoke] is false when signing out *because* the server already said
+  /// the token is dead: revoking it would be another 401, whose handler is
+  /// this very method.
+  Future<void> signOut({bool revoke = true}) async {
+    if (revoke) {
+      try {
+        await _api.post('/auth/logout');
+      } catch (_) {}
+    }
 
     // Cleared before storage, so a failure to clear storage cannot leave the
     // session usable in memory after someone has signed out.
