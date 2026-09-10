@@ -9,6 +9,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/async_view.dart';
 import 'core_auth.dart';
 import 'core_photos.dart';
+import 'guided_capture_screen.dart';
 
 /// Photographing a record that exists.
 ///
@@ -141,7 +142,35 @@ class _RecordPhotosScreenState extends ConsumerState<RecordPhotosScreen> {
     }
   }
 
-  void _choose(_Slot slot) {
+  /// The guided camera, starting on [first] and carrying on through every
+  /// other slot still waiting — a saree is four photographs, and the point
+  /// of the guide is that they are taken in one go without coming back to
+  /// this list between each. Each accepted capture is sent straight away;
+  /// a failed send is thrown back to the camera, which offers the slot
+  /// again rather than moving on past a photograph that never arrived.
+  Future<void> _guided(_Slot first, List<_Slot> all) async {
+    final queue = [
+      first,
+      for (final s in all)
+        if (s.id != first.id && s.url == null) s,
+    ];
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => GuidedCaptureScreen(
+          slots: [for (final s in queue) CaptureSlot(id: s.id, label: s.label)],
+          onCaptured: (slot, file) => ref.read(corePhotosProvider).upload(
+                recordId: widget.recordId,
+                slotId: slot.id,
+                file: file,
+              ),
+        ),
+      ),
+    );
+    if (mounted) _refresh();
+  }
+
+  void _choose(_Slot slot, List<_Slot> all) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: context.p.surface2,
@@ -150,11 +179,14 @@ class _RecordPhotosScreenState extends ConsumerState<RecordPhotosScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
+              leading: const Icon(Icons.center_focus_strong_outlined),
               title: Text('Photograph the ${slot.label.toLowerCase()}'),
+              subtitle: const Text(
+                'The frame tells you what to fix and takes the shot itself',
+              ),
               onTap: () {
                 Navigator.pop(sheet);
-                _pick(slot, ImageSource.camera);
+                _guided(slot, all);
               },
             ),
             ListTile(
@@ -163,6 +195,15 @@ class _RecordPhotosScreenState extends ConsumerState<RecordPhotosScreen> {
               onTap: () {
                 Navigator.pop(sheet);
                 _pick(slot, ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Use the plain camera'),
+              subtitle: const Text('No guide, no checks'),
+              onTap: () {
+                Navigator.pop(sheet);
+                _pick(slot, ImageSource.camera);
               },
             ),
             if (slot.url != null)
@@ -267,7 +308,7 @@ class _RecordPhotosScreenState extends ConsumerState<RecordPhotosScreen> {
             slot: slot,
             sending: _sending.containsKey(slot.id),
             enabled: storage.ready,
-            onTap: () => _choose(slot),
+            onTap: () => _choose(slot, slots.wanted),
           ),
       ],
     );

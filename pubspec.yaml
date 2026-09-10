@@ -47,6 +47,8 @@ dependencies:
 
   # Misc UI helpers
   intl: ^0.19.0
+  camera: ^0.12.0+2
+  image: ^4.9.2
 
 dev_dependencies:
   flutter_test:
@@ -60,7 +62,6 @@ dev_dependencies:
   # Icon + splash generation
   flutter_launcher_icons: ^0.14.1
   flutter_native_splash: ^2.4.4
-  image: ^4.3.0
 
 flutter:
   uses-material-design: true

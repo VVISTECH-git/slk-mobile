@@ -17,6 +17,7 @@ import 'core_photos.dart';
 import 'core_sign_in_screen.dart';
 import 'record_fields.dart';
 import 'record_form_fields.dart';
+import 'guided_capture_screen.dart';
 import 'record_photos_screen.dart';
 
 /// A new record, with every question the web editor asks.
@@ -54,6 +55,9 @@ class NewRecordScreen extends ConsumerStatefulWidget {
   @override
   ConsumerState<NewRecordScreen> createState() => _NewRecordScreenState();
 }
+
+/// How a photograph on the Images tab is taken.
+enum _CaptureVia { guided, camera, gallery }
 
 class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
     with RecordFormFields {
@@ -189,7 +193,7 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
       return;
     }
 
-    final source = await showModalBottomSheet<ImageSource>(
+    final via = await showModalBottomSheet<_CaptureVia>(
       context: context,
       backgroundColor: context.p.surface2,
       builder: (sheet) => SafeArea(
@@ -197,20 +201,49 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
+              leading: const Icon(Icons.center_focus_strong_outlined),
               title: Text('Photograph the ${slot.label.toLowerCase()}'),
-              onTap: () => Navigator.pop(sheet, ImageSource.camera),
+              subtitle: const Text(
+                'The frame tells you what to fix and takes the shot itself',
+              ),
+              onTap: () => Navigator.pop(sheet, _CaptureVia.guided),
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
               title: const Text('Choose from the gallery'),
-              onTap: () => Navigator.pop(sheet, ImageSource.gallery),
+              onTap: () => Navigator.pop(sheet, _CaptureVia.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Use the plain camera'),
+              subtitle: const Text('No guide, no checks'),
+              onTap: () => Navigator.pop(sheet, _CaptureVia.camera),
             ),
           ],
         ),
       ),
     );
-    if (source == null || !mounted) return;
+    if (via == null || !mounted) return;
+
+    if (via == _CaptureVia.guided) {
+      // One slot at a time here: the record does not exist yet, so nothing
+      // is sent — the file is held for the create, same as the plain path.
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          fullscreenDialog: true,
+          builder: (_) => GuidedCaptureScreen(
+            slots: [CaptureSlot(id: slot.id, label: slot.label)],
+            onCaptured: (_, file) async {
+              if (mounted) setState(() => _capturedPhotos[slot.id] = file);
+            },
+          ),
+        ),
+      );
+      return;
+    }
+
+    final source =
+        via == _CaptureVia.camera ? ImageSource.camera : ImageSource.gallery;
 
     // Same limits RecordPhotosScreen uses on the file it eventually sends.
     final XFile? picked;
