@@ -90,6 +90,9 @@ Map<String, String> requiredErrorsForTab({
   bool checkOpeningStock = false,
   String? openingLocationId,
   String? openingQty,
+  /// Whether the product type is a garment, whose sub type is required —
+  /// see [RecordFormFields.subTypeRequired], which knows the vocabulary.
+  bool requiresSubType = false,
 }) {
   final errors = <String, String>{};
 
@@ -103,6 +106,12 @@ Map<String, String> requiredErrorsForTab({
       if (blank(attrs[typeKey])) errors[typeKey] = 'Product type is needed';
 
       if (blank(attrs['fibreType'])) errors['fibreType'] = 'Fiber type is needed';
+
+      // A garment's sub type is its cut — the field is starred, and Next
+      // should say so rather than let a blank one through to the server.
+      if (requiresSubType && blank(attrs['garmentType'])) {
+        errors['garmentType'] = 'Product sub type is needed';
+      }
     case 1:
       if (blank(colourId)) errors['colour'] = 'Colour is needed';
       if (blank(attrs['craftTechnique'])) {
@@ -322,6 +331,17 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
         onFieldChanged();
       });
 
+  /// Whether the product type chosen is one whose sub type is required — a
+  /// garment, where the cut is the thing. A saree's sub type is a
+  /// description; the home industry never asks. Mirrors the Basic tab's own
+  /// starring of the field, so Next and the label agree.
+  bool subTypeRequired(CoreOptions o) {
+    if (isHomeIndustry(labelOf(o, 'industry', attrs['industry']))) return false;
+    final type = labelOf(o, 'product_type', attrs['productType']);
+    if (type == null || type == 'Saree') return false;
+    return narrow(o['garment_type'], attrs['productType']).isNotEmpty;
+  }
+
   /// Every extra a fresh Saree gets beyond the plain product type — sub
   /// type, its own Blouse-status cascade, and Saree style — pulled out so
   /// both the moment somebody actively picks Saree ([setProductType]) and
@@ -428,15 +448,22 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
             label: 'Industry *',
             value: attrs['industry'],
             options: pickOptions(o['industry']),
-            onChanged: (v) => setState(() {
-              attrs['industry'] = v;
-              // The old product type belongs to the old industry's list.
-              attrs['productType'] = null;
-              attrs['homeProductType'] = null;
-              attrs['garmentType'] = null;
-              fieldErrors = {...fieldErrors}..remove('industry');
-              onFieldChanged();
-            }),
+            onChanged: (v) {
+              // The picker fires on a bare re-confirm too. Only an actual
+              // change makes the old product type belong to another list;
+              // wiping it on Done-without-change blanked saved records that
+              // were only being looked at.
+              if (attrs['industry'] == v) return;
+              setState(() {
+                attrs['industry'] = v;
+                // The old product type belongs to the old industry's list.
+                attrs['productType'] = null;
+                attrs['homeProductType'] = null;
+                attrs['garmentType'] = null;
+                fieldErrors = {...fieldErrors}..remove('industry');
+                onFieldChanged();
+              });
+            },
           ),
         ),
 
@@ -485,7 +512,9 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
                 // for a saree, where the layout is a description.
                 label: isSaree ? 'Product sub type' : 'Product sub type *',
                 value: attrs['garmentType'],
-                allowClear: true,
+                // A required answer must not offer Clear — a garment's cut
+                // is the thing, and the star above says so.
+                allowClear: isSaree,
                 options:
                     pickOptions(narrow(o['garment_type'], attrs['productType'])),
                 onChanged: (v) => setGarmentType(o, v),
@@ -527,14 +556,18 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
             label: 'Fibre type *',
             value: attrs['fibreType'],
             options: pickOptions(o['fibre_type']),
-            onChanged: (v) => setState(() {
-              attrs['fibreType'] = v;
-              // Textile Material is narrowed by the fibre, so the old answer
-              // may no longer be on the list.
-              attrs['textileMaterial'] = null;
-              fieldErrors = {...fieldErrors}..remove('fibreType');
-              onFieldChanged();
-            }),
+            onChanged: (v) {
+              // Same guard as Industry: a re-confirm is not a change.
+              if (attrs['fibreType'] == v) return;
+              setState(() {
+                attrs['fibreType'] = v;
+                // Textile Material is narrowed by the fibre, so the old
+                // answer may no longer be on the list.
+                attrs['textileMaterial'] = null;
+                fieldErrors = {...fieldErrors}..remove('fibreType');
+                onFieldChanged();
+              });
+            },
           ),
         ),
         RecordFieldWrap(
@@ -576,6 +609,11 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
         const SizedBox(height: 8),
         TextField(
           controller: nameField,
+          // "Kalamkari", "Mulmul", "Pallu" are not typos, and a keyboard
+          // that "fixes" them into English words would save the wrong name.
+          autocorrect: false,
+          enableSuggestions: false,
+          textCapitalization: TextCapitalization.words,
           decoration: InputDecoration(
             labelText: 'Product name',
             border: const OutlineInputBorder(),
@@ -652,11 +690,15 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
             value: attrs['motifCategory'],
             allowClear: true,
             options: pickOptions(o['motif_category']),
-            onChanged: (v) => setState(() {
-              attrs['motifCategory'] = v;
-              attrs['motif'] = null;
-              onFieldChanged();
-            }),
+            onChanged: (v) {
+              // Same guard as Industry: a re-confirm is not a change.
+              if (attrs['motifCategory'] == v) return;
+              setState(() {
+                attrs['motifCategory'] = v;
+                attrs['motif'] = null;
+                onFieldChanged();
+              });
+            },
           ),
         ),
         RecordFieldWrap(

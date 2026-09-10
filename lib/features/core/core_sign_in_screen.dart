@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/config.dart';
@@ -89,6 +90,9 @@ class _CoreSignInScreenState extends ConsumerState<CoreSignInScreen> {
       // Both: the snackbar catches the eye, the inline copy is still there
       // when somebody looks up from the saree in their hands.
       if (mounted) {
+        // The PIN that was refused has no second try in it; the code does.
+        _pin.clear();
+        _pinFocus.requestFocus();
         setState(() => _failure = '$e');
         showError(context, e);
       }
@@ -157,6 +161,9 @@ class _CoreSignInScreenState extends ConsumerState<CoreSignInScreen> {
                     focusNode: _pinFocus,
                     obscureText: true,
                     keyboardType: TextInputType.number,
+                    // A PIN is digits; a pasted space or letter would only
+                    // spend one of the lockout's attempts.
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     textInputAction: TextInputAction.done,
                     onSubmitted: (_) => _busy ? null : _submit(),
                     decoration: const InputDecoration(

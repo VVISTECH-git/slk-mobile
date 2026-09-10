@@ -214,9 +214,34 @@ class _RecordPhotosScreenState extends ConsumerState<RecordPhotosScreen> {
                   style: TextStyle(color: context.p.danger),
                 ),
                 subtitle: const Text('The slot stays on the shot list'),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(sheet);
-                  _remove(slot);
+                  // Irreversible from here — the file is gone from storage,
+                  // and a photograph took somebody a trip to the shelf.
+                  final sure = await showDialog<bool>(
+                    context: context,
+                    builder: (dialog) => AlertDialog(
+                      title: Text('Remove the ${slot.label.toLowerCase()} photograph?'),
+                      content: const Text(
+                        'The slot stays on the shot list, but the photograph '
+                        'itself cannot be brought back.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dialog, false),
+                          child: const Text('Keep it'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(dialog, true),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: context.p.danger,
+                          ),
+                          child: const Text('Remove'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (sure == true && mounted) await _remove(slot);
                 },
               ),
           ],

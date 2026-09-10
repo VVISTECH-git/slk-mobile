@@ -201,6 +201,29 @@ void main() {
       expect(errors, {'fibreType': 'Fiber type is needed'});
     });
 
+    test('Basic: a garment needs its sub type, a saree does not', () {
+      // The field is starred for a garment; Next should say so rather than
+      // let a blank cut through to the server.
+      expect(
+        requiredErrorsForTab(
+          tabIndex: 0,
+          attrs: const {'industry': 'clothing', 'productType': 'kurthi', 'fibreType': 'cotton'},
+          home: false,
+          requiresSubType: true,
+        ),
+        {'garmentType': 'Product sub type is needed'},
+      );
+
+      expect(
+        requiredErrorsForTab(
+          tabIndex: 0,
+          attrs: const {'industry': 'clothing', 'productType': 'saree', 'fibreType': 'cotton'},
+          home: false,
+        ),
+        isEmpty,
+      );
+    });
+
     test('Craft: colour and craft technique are both required', () {
       final errors = requiredErrorsForTab(
         tabIndex: 1,

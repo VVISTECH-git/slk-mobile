@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/api_client.dart';
 import '../../models/core.dart';
@@ -53,7 +55,12 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
 
   Future<void> _lookup(String raw) async {
     final code = raw.trim();
-    if (code.isEmpty) return;
+    if (code.isEmpty) {
+      // Nothing to look up — but the keypad that was open to type it is
+      // the one thing on screen, and this is the only key that closes it.
+      SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+      return;
+    }
 
     setState(() {
       _busy = true;
@@ -90,8 +97,13 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
       if (mounted) {
         setState(() => _busy = false);
         _field.clear();
-        // Ready for the next scan without anybody tapping the field again.
+        // Ready for the next scan without anybody tapping the field again:
+        // a Bluetooth scanner types into whichever field has focus, so focus
+        // stays here. The on-screen keyboard is a different matter — it
+        // covered the very pieces just looked up, on a phone whose keypad
+        // can't even submit — so it is put away. A scanner never needs it.
         _focus.requestFocus();
+        SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
       }
     }
   }
@@ -123,6 +135,11 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
       backgroundColor: p.surface1,
       appBar: AppBar(title: const Text('Stock Records')),
       body: ListView(
+        // The field keeps focus on purpose (a scanner types into it), so a
+        // tap on it re-opens the keypad over the results with nothing to
+        // close it. Scrolling the results is the natural next move — that
+        // now puts the keypad away.
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
           Row(
@@ -134,7 +151,12 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
                   autofocus: true,
                   keyboardType: TextInputType.number,
                   textInputAction: TextInputAction.search,
-                  onSubmitted: _lookup,
+                  // Guarded like the arrow: a scanner's Enter arriving while
+                  // a lookup is in flight would start a second one and show
+                  // whichever answered last under the other's heading.
+                  onSubmitted: (v) {
+                    if (!_busy) _lookup(v);
+                  },
                   decoration: InputDecoration(
                     labelText: 'Item or product code',
                     hintText: '500066 or 300032',
@@ -350,6 +372,27 @@ class _PieceCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // The same QR the printed label carries — the bare item code,
+              // which is what a scan of either resolves. On screen so a
+              // piece can be identified or handed on without a label
+              // printed, and another phone can scan it straight off this
+              // one. White behind it with room around: a QR needs its quiet
+              // zone, and the card is not white.
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: p.border),
+                ),
+                child: QrImageView(
+                  data: piece.itemCode,
+                  size: 64,
+                  padding: EdgeInsets.zero,
+                  backgroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

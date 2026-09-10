@@ -367,6 +367,48 @@ void main() {
     );
   });
 
+  group('subTypeRequired — only a garment has a cut to name', () {
+    final options = <String, List<CoreOption>>{
+      'industry': [opt('clothing', 'Clothing'), opt('home', 'Home')],
+      'product_type': [
+        opt('saree', 'Saree', parent: 'clothing'),
+        opt('kurthi', 'Kurthi', parent: 'clothing'),
+        opt('dupatta', 'Dupatta', parent: 'clothing'),
+      ],
+      'garment_type': [
+        opt('with-blouse', 'With Blouse', parent: 'saree'),
+        opt('a-line', 'A-line', parent: 'kurthi'),
+      ],
+    };
+
+    testWidgets('a kurthi requires it', (tester) async {
+      late _HarnessState fields;
+      await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+      await tester.pump();
+      fields.attrs['industry'] = 'clothing';
+      fields.attrs['productType'] = 'kurthi';
+      expect(fields.subTypeRequired(options), isTrue);
+    });
+
+    testWidgets('a saree does not, nor a type with no sub types, nor the home industry',
+        (tester) async {
+      late _HarnessState fields;
+      await tester.pumpWidget(_Harness(onReady: (f) => fields = f));
+      await tester.pump();
+
+      fields.attrs['industry'] = 'clothing';
+      fields.attrs['productType'] = 'saree';
+      expect(fields.subTypeRequired(options), isFalse);
+
+      fields.attrs['productType'] = 'dupatta';
+      expect(fields.subTypeRequired(options), isFalse);
+
+      fields.attrs['industry'] = 'home';
+      fields.attrs['productType'] = 'kurthi';
+      expect(fields.subTypeRequired(options), isFalse);
+    });
+  });
+
   group('Saree defaults to All Over', () {
     final options = <String, List<CoreOption>>{
       'product_type': [

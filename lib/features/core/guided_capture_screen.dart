@@ -72,6 +72,11 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   bool _analysing = false;
   bool _shooting = false;
 
+  /// While [onCaptured] runs — an upload, on the record's photo screen.
+  /// Both review buttons are held until it returns: a second "Use it
+  /// anyway" on slow wifi used to send the file twice and skip a slot.
+  bool _accepting = false;
+
   /// The photograph waiting for a decision, and what the still check said.
   File? _reviewFile;
   Verdict? _reviewVerdict;
@@ -345,7 +350,8 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
 
   Future<void> _accept() async {
     final file = _reviewFile;
-    if (file == null) return;
+    if (file == null || _accepting) return;
+    setState(() => _accepting = true);
     try {
       await widget.onCaptured(_slot, file);
     } catch (e) {
@@ -353,10 +359,12 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$e'), backgroundColor: context.p.danger),
       );
+      _accepting = false;
       _resume();
       return;
     }
     if (!mounted) return;
+    _accepting = false;
 
     _done[_slot.id] = file;
     if (_index + 1 >= widget.slots.length) {
@@ -367,7 +375,10 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     _resume();
   }
 
-  void _retake() => _resume();
+  void _retake() {
+    if (_accepting) return;
+    _resume();
+  }
 
   void _resume() {
     _reviewFile = null;
@@ -464,6 +475,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
               verdict: _verdict,
               guide: _rule.guide,
               review: _reviewVerdict,
+              accepting: _accepting,
               onShutter: _manualShutter,
               onRetake: _retake,
               onAccept: _accept,
@@ -564,6 +576,7 @@ class _Footer extends StatelessWidget {
     required this.verdict,
     required this.guide,
     required this.review,
+    required this.accepting,
     required this.onShutter,
     required this.onRetake,
     required this.onAccept,
@@ -573,6 +586,7 @@ class _Footer extends StatelessWidget {
   final Verdict verdict;
   final String guide;
   final Verdict? review;
+  final bool accepting;
   final VoidCallback onShutter;
   final VoidCallback onRetake;
   final VoidCallback onAccept;
@@ -587,7 +601,19 @@ class _Footer extends StatelessWidget {
     switch (phase) {
       case _Phase.review:
         final r = review;
-        if (r == null || (r.ok && !r.warning)) {
+        if (accepting) {
+          line = const _Line('Sending…', colour: Colors.white70);
+          actions = const SizedBox(
+            height: 56,
+            child: Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ),
+            ),
+          );
+        } else if (r == null || (r.ok && !r.warning)) {
           line = _Line('Captured', colour: p.success);
           actions = const SizedBox(height: 56);
         } else {

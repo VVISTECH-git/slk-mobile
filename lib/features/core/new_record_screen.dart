@@ -640,6 +640,7 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
               colourId: colourId,
               retailPrice: prices['retail']!.text,
               checkOpeningStock: true,
+              requiresSubType: subTypeRequired(opts),
               openingLocationId: _location,
               openingQty: _qty.text,
             );
@@ -743,9 +744,11 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
         const SizedBox(height: 12),
         RecordFieldWrap(
           child: PickerField(
-            label: 'Where',
+            // Required with the count — Next says "At least one location
+            // needs a quantity" — so it is starred and not clearable, like
+            // every other required picker on this form.
+            label: 'Where *',
             value: _location,
-            allowClear: true,
             options: [for (final l in internal) PickerOption(l.id, l.name)],
             onChanged: (v) => setState(() {
               _location = v;

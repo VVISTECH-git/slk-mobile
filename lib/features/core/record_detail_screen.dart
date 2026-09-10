@@ -55,7 +55,13 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
   bool _busy = false;
   CoreRecordDetail? _current;
 
-  Future<CoreRecordDetail> _load() async {
+  /// [seed] false re-reads the record — fresh stock, ledger, consignments —
+  /// without rewriting the form fields from it. Recording a delivery on the
+  /// Stock tab used to re-seed every tab, so a price corrected on Prices a
+  /// moment earlier vanished without a word. Only a load that *should*
+  /// replace what is typed — the first, after Save, after an error retry —
+  /// seeds.
+  Future<CoreRecordDetail> _load({bool seed = true}) async {
     final api = ref.read(coreApiProvider);
     final data = ((await api.get('/records/${widget.recordId}')) as Map)
         .cast<String, dynamic>();
@@ -72,10 +78,18 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
       the title sat on "Product" until something else happened to rebuild the
       screen.
     */
-    if (mounted) {
-      setState(() => _seed(record));
+    if (seed) {
+      if (mounted) {
+        setState(() => _seed(record));
+      } else {
+        _seed(record);
+      }
+    } else if (mounted) {
+      // The AppBar still reads _current for the code and the camera
+      // button; the fields keep whatever is typed in them.
+      setState(() => _current = record);
     } else {
-      _seed(record);
+      _current = record;
     }
 
     return record;
@@ -479,7 +493,7 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
           onRecorded: (message) {
             showOk(context, message);
             setState(() {
-              _record = _load();
+              _record = _load(seed: false);
             });
           },
         ),
@@ -585,7 +599,7 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
               consignment: c,
               canPublish: canPublish,
               onChanged: () => setState(() {
-                _record = _load();
+                _record = _load(seed: false);
               }),
             ),
       ],
@@ -933,7 +947,9 @@ class _RecordMovementFormState extends ConsumerState<_RecordMovementForm> {
       return;
     }
     final qty = _qty.text.trim();
-    if (qty.isEmpty) {
+    // The message promises "above zero"; "0" used to pass this check and
+    // go to the server for the same answer, one round trip later.
+    if (qty.isEmpty || (int.tryParse(qty) ?? 0) <= 0) {
       setState(() => _error = 'How many? It has to be a number above zero.');
       return;
     }
