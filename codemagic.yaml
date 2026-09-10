@@ -25,6 +25,20 @@ workflows:
     # VVIS apps build on). Android builds fine on macOS instances.
     instance_type: mac_mini_m2
     max_build_duration: 60
+    # Builds start on their own from a push to main. Before this, nothing in
+    # the file asked Codemagic to — a yaml-configured project builds only
+    # when somebody starts it — and a fix pushed to unblock a failed publish
+    # sat unbuilt while the old failure was read as the new result.
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+      # A second push while the first is still building would otherwise
+      # publish both, in whichever order they finished.
+      cancel_previous_builds: true
     environment:
       flutter: stable
       java: 17
@@ -92,6 +106,15 @@ workflows:
     # "VVIS Codemagic" App Store Connect key.
     instance_type: mac_mini_m2
     max_build_duration: 90
+    # Same trigger as the Android workflow, for the same reason — see there.
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+      cancel_previous_builds: true
     integrations:
       app_store_connect: "VVIS Codemagic" # App Store Connect API key (Key: V3NW8K9FQ9)
     environment:
