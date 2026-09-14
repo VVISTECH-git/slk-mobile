@@ -867,6 +867,7 @@ class CoreBale {
     required this.baleCount,
     required this.status,
     required this.billEntryDate,
+    this.thaanCount = 0,
   });
 
   final String id;
@@ -878,11 +879,16 @@ class CoreBale {
   final String itemName;
   final int baleCount;
 
-  /// `awaiting_cutting`, `cut`, or `returned`.
+  /// `awaiting_cutting`, `cutting_in_progress`, `cut`, or `returned`.
   final String status;
 
   /// "14 Sep 2026" — already formatted server-side.
   final String billEntryDate;
+
+  /// How many Thaans have been recorded from this bale so far. Zero while
+  /// still `awaiting_cutting`; only ever grows, across as many recordings
+  /// as cutting takes.
+  final int thaanCount;
 
   factory CoreBale.fromJson(Map<String, dynamic> json) => CoreBale(
         id: json['id'] as String,
@@ -895,5 +901,6 @@ class CoreBale {
         baleCount: (json['baleCount'] as num).toInt(),
         status: json['status'] as String,
         billEntryDate: json['billEntryDate'] as String,
+        thaanCount: (json['thaanCount'] as num?)?.toInt() ?? 0,
       );
 }

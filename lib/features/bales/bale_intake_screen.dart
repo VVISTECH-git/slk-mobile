@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/api_client.dart';
 import '../../models/core.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/async_view.dart';
@@ -39,6 +40,9 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
   final _baleCount = TextEditingController(text: '1');
   final _notes = TextEditingController();
 
+  final _search = TextEditingController();
+  String _searchQuery = '';
+
   bool _busy = false;
 
   @override
@@ -49,6 +53,7 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
     _metresReceived.dispose();
     _baleCount.dispose();
     _notes.dispose();
+    _search.dispose();
     super.dispose();
   }
 
@@ -112,6 +117,20 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
       lastDate: DateTime.now().add(const Duration(days: 1)),
     );
     if (picked != null) onPicked(picked);
+  }
+
+  void _openRecordSheet(CoreBale bale) {
+    if (bale.status == 'cut' || bale.status == 'returned') {
+      showError(context, '${bale.code} is already ${bale.status == 'cut' ? 'cut' : 'returned'} — nothing more to record.');
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.p.surface2,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _RecordThaansSheet(bale: bale),
+    ).then((_) => ref.invalidate(coreBalesProvider));
   }
 
   @override
@@ -222,16 +241,57 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
             decoration: const InputDecoration(labelText: 'Notes', helperText: 'Anything else worth recording.'),
           ),
           const Divider(height: 32),
-          Text('Recent bales', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: context.p.text)),
-          const SizedBox(height: 8),
-          AsyncView<List<CoreBale>>(
-            value: bales,
-            emptyMessage: 'No bales logged yet.',
-            isEmpty: (d) => d.isEmpty,
-            loading: const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator())),
-            onRetry: () => ref.invalidate(coreBalesProvider),
-            data: (rows) => Column(children: [for (final b in rows.take(10)) _BaleRow(bale: b)]),
+          Text('Record Thaans cut', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: context.p.text)),
+          const SizedBox(height: 2),
+          Text(
+            'Find a bale already on file by its code to log how many Thaans were just cut from it.',
+            style: TextStyle(fontSize: 12.5, color: context.p.textSecondary),
           ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _search,
+            textCapitalization: TextCapitalization.characters,
+            decoration: InputDecoration(
+              hintText: 'Search bale code, e.g. 1064',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _searchQuery.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _search.clear();
+                        setState(() => _searchQuery = '');
+                      },
+                    ),
+            ),
+            onChanged: (v) => setState(() => _searchQuery = v.trim()),
+          ),
+          if (_searchQuery.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            bales.when(
+              loading: () => const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator())),
+              error: (e, _) => Text('$e', style: TextStyle(color: context.p.danger)),
+              data: (rows) {
+                final q = _searchQuery.toLowerCase();
+                final matches = rows.where((b) => b.code.toLowerCase().contains(q)).toList();
+                if (matches.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Text('No bale matches "$_searchQuery".', style: TextStyle(color: context.p.textSecondary)),
+                  );
+                }
+                return Column(
+                  children: [
+                    for (final b in matches)
+                      _BaleRow(
+                        bale: b,
+                        onTap: () => _openRecordSheet(b),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ],
         ],
       ),
       bottomNavigationBar: SafeArea(
@@ -327,9 +387,10 @@ class _DateField extends StatelessWidget {
 }
 
 class _BaleRow extends StatelessWidget {
-  const _BaleRow({required this.bale});
+  const _BaleRow({required this.bale, this.onTap});
 
   final CoreBale bale;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -337,31 +398,200 @@ class _BaleRow extends StatelessWidget {
     final statusColor = switch (bale.status) {
       'cut' => p.success,
       'returned' => p.danger,
+      'cutting_in_progress' => p.accent,
       _ => p.textSecondary,
     };
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${bale.code} · ${bale.supplierName}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${bale.itemName} · ${bale.metresReceived} ${bale.uom} · ${bale.billEntryDate}'
+                      '${bale.thaanCount > 0 ? ' · ${bale.thaanCount} Thaan${bale.thaanCount == 1 ? '' : 's'} so far' : ''}',
+                      style: TextStyle(fontSize: 12, color: p.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text('${bale.code} · ${bale.supplierName}', style: const TextStyle(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${bale.itemName} · ${bale.metresReceived} ${bale.uom} · ${bale.billEntryDate}',
-                    style: TextStyle(fontSize: 12, color: p.textSecondary),
-                  ),
+                  Text(bale.status.replaceAll('_', ' '), style: TextStyle(fontSize: 12, color: statusColor, fontWeight: FontWeight.w600)),
+                  if (onTap != null) Icon(Icons.chevron_right, size: 18, color: p.textMuted),
                 ],
               ),
-            ),
-            Text(bale.status.replaceAll('_', ' '), style: TextStyle(fontSize: 12, color: statusColor, fontWeight: FontWeight.w600)),
-          ],
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+/// Recording Thaans cut from one bale — reusable across more than one
+/// recording in the same visit, since cutting can be partial (see the
+/// decision doc's "Re-revised" note): record some, keep the sheet open,
+/// record more, and only close it out with "Mark cutting complete" once
+/// nothing more will be cut from this bale.
+class _RecordThaansSheet extends ConsumerStatefulWidget {
+  const _RecordThaansSheet({required this.bale});
+  final CoreBale bale;
+
+  @override
+  ConsumerState<_RecordThaansSheet> createState() => _RecordThaansSheetState();
+}
+
+class _RecordThaansSheetState extends ConsumerState<_RecordThaansSheet> {
+  late CoreBale _bale;
+  final _count = TextEditingController();
+
+  /// Minted once per attempt and reused across a retry of that same attempt
+  /// — the same idempotency-key discipline `new_record_screen.dart` follows.
+  /// Cleared only after a confirmed success, at which point the next
+  /// recording is a genuinely new one and needs its own key.
+  String? _recordKey;
+
+  bool _recording = false;
+  bool _completing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _bale = widget.bale;
+  }
+
+  @override
+  void dispose() {
+    _count.dispose();
+    super.dispose();
+  }
+
+  Future<void> _record() async {
+    final count = _count.text.trim();
+    if (!(int.tryParse(count) != null && int.parse(count) > 0)) {
+      showError(context, 'Enter how many Thaans were just cut.');
+      return;
+    }
+
+    _recordKey ??= idempotencyKey();
+
+    setState(() => _recording = true);
+    try {
+      final message = await ref.read(baleRepositoryProvider).recordThaans(
+            baleId: _bale.id,
+            thaanCount: count,
+            key: _recordKey!,
+          );
+      if (!mounted) return;
+      showOk(context, message);
+      setState(() {
+        _bale = CoreBale(
+          id: _bale.id,
+          code: _bale.code,
+          supplierName: _bale.supplierName,
+          type: _bale.type,
+          metresReceived: _bale.metresReceived,
+          uom: _bale.uom,
+          itemName: _bale.itemName,
+          baleCount: _bale.baleCount,
+          status: 'cutting_in_progress',
+          billEntryDate: _bale.billEntryDate,
+        );
+        _count.clear();
+      });
+      _recordKey = null; // that attempt succeeded; the next one is a new intent
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _recording = false);
+    }
+  }
+
+  Future<void> _complete() async {
+    setState(() => _completing = true);
+    try {
+      final message = await ref.read(baleRepositoryProvider).markCuttingComplete(_bale.id);
+      if (!mounted) return;
+      showOk(context, message);
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _completing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final busy = _recording || _completing;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${_bale.code} · ${_bale.supplierName}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+          const SizedBox(height: 2),
+          Text('${_bale.itemName} · ${_bale.metresReceived} ${_bale.uom}', style: TextStyle(fontSize: 13, color: p.textSecondary)),
+          const SizedBox(height: 12),
+          Text(
+            _bale.thaanCount > 0
+                ? '${_bale.thaanCount} Thaan${_bale.thaanCount == 1 ? '' : 's'} recorded so far.'
+                : 'No Thaans recorded yet.',
+            style: TextStyle(fontSize: 13, color: p.textSecondary),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _count,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: const InputDecoration(
+              labelText: 'Thaans just cut',
+              helperText: 'The whole bale, or only part of it — recording again later adds more.',
+            ),
+          ),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: busy ? null : _record,
+            icon: _recording
+                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.add),
+            label: Text(_recording ? 'Recording…' : 'Record'),
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: busy || _bale.thaanCount == 0 ? null : _complete,
+            icon: _completing
+                ? SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: p.accent))
+                : const Icon(Icons.check_circle_outline),
+            label: Text(_completing ? 'Completing…' : 'Mark cutting complete'),
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          ),
+          if (_bale.thaanCount == 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'Record at least one Thaan before this bale can be marked cut.',
+                style: TextStyle(fontSize: 12, color: p.textMuted),
+              ),
+            ),
+        ],
       ),
     );
   }

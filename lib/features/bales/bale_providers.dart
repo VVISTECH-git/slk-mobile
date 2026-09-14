@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/api_client.dart';
 import '../../models/core.dart';
 import '../core/core_auth.dart';
 
@@ -34,8 +35,9 @@ final coreClothItemsProvider = FutureProvider.autoDispose<List<CoreClothItem>>((
   ];
 });
 
-/// Recent entries, for the intake screen's own confirmation list — the same
-/// table the web page shows, unfiltered and newest first.
+/// Every bale on file, unfiltered and newest first — the same table the web
+/// page shows. Searched client-side by code so a floor phone can find one
+/// bale to record Thaans against without a dedicated search endpoint.
 final coreBalesProvider = FutureProvider.autoDispose<List<CoreBale>>((ref) async {
   final data = await ref.watch(coreApiProvider).get('/bales');
   return [
@@ -80,6 +82,29 @@ class BaleRepository {
       'baleCount': baleCount,
       'notes': notes,
     });
+    return (data as Map)['message'] as String;
+  }
+
+  /// Records Thaans cut from a bale — as many times as it takes. [key]
+  /// must be minted once per attempt and reused across a retry of that same
+  /// attempt (see [idempotencyKey]): recording twice on a network hiccup
+  /// would mint real, physical Thaans that were never actually cut.
+  Future<String> recordThaans({
+    required String baleId,
+    required String thaanCount,
+    required String key,
+  }) async {
+    final data = await ref.read(coreApiProvider).post(
+          '/bales/$baleId/thaans',
+          body: {'thaanCount': thaanCount},
+          headers: {'Idempotency-Key': key},
+        );
+    return (data as Map)['message'] as String;
+  }
+
+  /// Closes a bale's cutting out — nothing more will be cut from it.
+  Future<String> markCuttingComplete(String baleId) async {
+    final data = await ref.read(coreApiProvider).post('/bales/$baleId/complete');
     return (data as Map)['message'] as String;
   }
 }
