@@ -807,3 +807,93 @@ class CoreImageSlot {
         url: json['url'] as String?,
       );
 }
+
+/// A supplier of raw kora cloth — Bale Intake's Supplier field.
+///
+/// Its own table on slk-core, not vocabulary from `/options`: see
+/// `packages/db/src/schema/production.ts`'s own note on why Kora to Shelf is
+/// deliberately independent of the catalogue.
+class CoreSupplier {
+  const CoreSupplier({
+    required this.id,
+    required this.name,
+    required this.status,
+  });
+
+  final String id;
+  final String name;
+
+  /// `active` or `inactive` — an inactive supplier stays on old bales but
+  /// drops out of the picker for a new one.
+  final String status;
+
+  factory CoreSupplier.fromJson(Map<String, dynamic> json) => CoreSupplier(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        status: json['status'] as String,
+      );
+}
+
+/// A named kind of cloth — Bale Intake's Item field.
+class CoreClothItem {
+  const CoreClothItem({
+    required this.id,
+    required this.name,
+    required this.status,
+  });
+
+  final String id;
+  final String name;
+  final String status;
+
+  factory CoreClothItem.fromJson(Map<String, dynamic> json) => CoreClothItem(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        status: json['status'] as String,
+      );
+}
+
+/// One bale entry, as the intake list shows it back — field-for-field what
+/// `loadBales()` returns on slk-core.
+class CoreBale {
+  const CoreBale({
+    required this.id,
+    required this.code,
+    required this.supplierName,
+    required this.type,
+    required this.metresReceived,
+    required this.uom,
+    required this.itemName,
+    required this.baleCount,
+    required this.status,
+    required this.billEntryDate,
+  });
+
+  final String id;
+  final String code;
+  final String supplierName;
+  final String type;
+  final double metresReceived;
+  final String uom;
+  final String itemName;
+  final int baleCount;
+
+  /// `awaiting_cutting`, `cut`, or `returned`.
+  final String status;
+
+  /// "14 Sep 2026" — already formatted server-side.
+  final String billEntryDate;
+
+  factory CoreBale.fromJson(Map<String, dynamic> json) => CoreBale(
+        id: json['id'] as String,
+        code: json['code'] as String,
+        supplierName: json['supplierName'] as String,
+        type: json['type'] as String,
+        metresReceived: (json['metresReceived'] as num).toDouble(),
+        uom: json['uom'] as String,
+        itemName: json['itemName'] as String,
+        baleCount: (json['baleCount'] as num).toInt(),
+        status: json['status'] as String,
+        billEntryDate: json['billEntryDate'] as String,
+      );
+}

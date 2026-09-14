@@ -113,6 +113,12 @@ const _modules = [
     Icons.local_shipping_outlined,
     '/core/picking',
   ),
+  _Module(
+    'Bale Intake',
+    'Log a bale of raw cloth as it arrives',
+    Icons.inventory_outlined,
+    '/core/bales/new',
+  ),
 ];
 
 class _Tile extends StatelessWidget {

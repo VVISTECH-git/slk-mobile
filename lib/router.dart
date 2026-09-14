@@ -13,6 +13,7 @@ import 'features/products/product_form_screen.dart';
 import 'features/products/variant_photos_screen.dart';
 import 'features/category/category_list_screen.dart';
 import 'features/category/category_form_screen.dart';
+import 'features/bales/bale_intake_screen.dart';
 import 'features/core/core_auth.dart';
 import 'features/core/core_home_screen.dart';
 import 'features/core/core_sign_in_screen.dart';
@@ -173,6 +174,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       // An order Shopify has already reserved, waiting to actually leave —
       // packing writes the movement; reserving never does.
       GoRoute(path: '/core/picking', builder: (_, _) => const PickingScreen()),
+
+      // Kora to Shelf, step one: receiving a bale. slk-core's own new
+      // pipeline — the mobile side of apps/web/src/app/bales/.
+      GoRoute(path: '/core/bales/new', builder: (_, _) => const BaleIntakeScreen()),
 
       // POS + invoices — live.
       GoRoute(path: '/pos', builder: (_, _) => const PosScreen()),
