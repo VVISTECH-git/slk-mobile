@@ -14,7 +14,8 @@ import 'bale_providers.dart';
 ///
 /// Field-for-field parity with the web's Bale Intake drawer
 /// (apps/web/src/app/bales/bales.tsx) — supplier, bill entry date, type,
-/// transporter, invoice details, quantity, unit, bale count, item, notes.
+/// bill details, quantity, unit, bale count, item, code, remarks. No
+/// transporter field: the web dropped it as unused, so this does too.
 ///
 /// Purely intake — finding a bale already on file to record Thaans cut
 /// from it is a different job on a different screen, [RecordCuttingScreen]
@@ -35,23 +36,23 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
   String? _itemId;
   DateTime _billEntryDate = DateTime.now();
 
-  final _transporter = TextEditingController();
   final _invoiceNumber = TextEditingController();
   DateTime? _invoiceDate;
   final _invoiceAmount = TextEditingController();
   final _metresReceived = TextEditingController();
   final _baleCount = TextEditingController(text: '1');
+  final _gradeCode = TextEditingController();
   final _notes = TextEditingController();
 
   bool _busy = false;
 
   @override
   void dispose() {
-    _transporter.dispose();
     _invoiceNumber.dispose();
     _invoiceAmount.dispose();
     _metresReceived.dispose();
     _baleCount.dispose();
+    _gradeCode.dispose();
     _notes.dispose();
     super.dispose();
   }
@@ -77,10 +78,10 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
             metresReceived: _metresReceived.text.trim(),
             uom: _uom,
             itemId: _itemId!,
-            transporter: _transporter.text.trim(),
             invoiceNumber: _invoiceNumber.text.trim(),
             invoiceDate: _invoiceDate == null ? '' : DateFormat('yyyy-MM-dd').format(_invoiceDate!),
             invoiceAmount: _invoiceAmount.text.trim(),
+            gradeCode: _gradeCode.text.trim(),
             baleCount: _baleCount.text.trim().isEmpty ? '1' : _baleCount.text.trim(),
             notes: _notes.text.trim(),
           );
@@ -104,6 +105,7 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
       _invoiceNumber.clear();
       _invoiceAmount.clear();
       _invoiceDate = null;
+      _gradeCode.clear();
       _notes.clear();
     });
   }
@@ -159,22 +161,17 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _transporter,
-            decoration: const InputDecoration(labelText: 'Transporter', helperText: 'Optional — who delivered it.'),
-          ),
-          const SizedBox(height: 12),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: TextField(
                   controller: _invoiceNumber,
-                  decoration: const InputDecoration(labelText: 'Invoice number', helperText: "Blank if it hasn't arrived."),
+                  decoration: const InputDecoration(labelText: 'Bill No', helperText: "Blank if it hasn't arrived."),
                 ),
               ),
               const SizedBox(width: 12),
-              Expanded(child: _DateField(label: 'Invoice date', value: _invoiceDate, onTap: () => _pickDate(_invoiceDate ?? DateTime.now(), (d) => setState(() => _invoiceDate = d)), optional: true)),
+              Expanded(child: _DateField(label: 'Bill Date', value: _invoiceDate, onTap: () => _pickDate(_invoiceDate ?? DateTime.now(), (d) => setState(() => _invoiceDate = d)), optional: true)),
             ],
           ),
           const SizedBox(height: 12),
@@ -182,7 +179,7 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
             controller: _invoiceAmount,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-            decoration: const InputDecoration(labelText: 'Invoice amount', prefixText: '₹ ', helperText: "The bill's own total."),
+            decoration: const InputDecoration(labelText: 'Bill amount', prefixText: '₹ ', helperText: "The bill's own total."),
           ),
           const Divider(height: 32),
           Row(
@@ -216,12 +213,27 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
             decoration: const InputDecoration(labelText: 'Number of bales'),
           ),
           const SizedBox(height: 12),
-          _ItemField(items: items, value: _itemId, onChanged: (v) => setState(() => _itemId = v)),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 2,
+                child: _ItemField(items: items, value: _itemId, onChanged: (v) => setState(() => _itemId = v)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _gradeCode,
+                  decoration: const InputDecoration(labelText: 'Code', helperText: 'identifier'),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
           TextField(
             controller: _notes,
             maxLines: 2,
-            decoration: const InputDecoration(labelText: 'Notes', helperText: 'Anything else worth recording.'),
+            decoration: const InputDecoration(labelText: 'Remarks', helperText: 'Anything else worth recording.'),
           ),
         ],
       ),

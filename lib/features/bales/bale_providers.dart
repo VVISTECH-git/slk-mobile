@@ -61,17 +61,16 @@ class BaleRepository {
     required String metresReceived,
     required String uom,
     required String itemId,
-    String transporter = '',
     String invoiceNumber = '',
     String invoiceDate = '',
     String invoiceAmount = '',
+    String gradeCode = '',
     String baleCount = '1',
     String notes = '',
   }) async {
     final data = await ref.read(coreApiProvider).post('/bales', body: {
       'supplierId': supplierId,
       'billEntryDate': billEntryDate,
-      'transporter': transporter,
       'invoiceNumber': invoiceNumber,
       'invoiceDate': invoiceDate,
       'invoiceAmount': invoiceAmount,
@@ -79,6 +78,7 @@ class BaleRepository {
       'metresReceived': metresReceived,
       'uom': uom,
       'itemId': itemId,
+      'gradeCode': gradeCode,
       'baleCount': baleCount,
       'notes': notes,
     });
