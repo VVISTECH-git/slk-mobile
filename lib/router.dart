@@ -14,6 +14,7 @@ import 'features/products/variant_photos_screen.dart';
 import 'features/category/category_list_screen.dart';
 import 'features/category/category_form_screen.dart';
 import 'features/bales/bale_intake_screen.dart';
+import 'features/bales/record_cutting_screen.dart';
 import 'features/core/core_auth.dart';
 import 'features/core/core_home_screen.dart';
 import 'features/core/core_sign_in_screen.dart';
@@ -178,6 +179,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Kora to Shelf, step one: receiving a bale. slk-core's own new
       // pipeline — the mobile side of apps/web/src/app/bales/.
       GoRoute(path: '/core/bales/new', builder: (_, _) => const BaleIntakeScreen()),
+
+      // Recording Thaans cut from a bale already on file — its own screen,
+      // not a section of the intake one; see record_cutting_screen.dart.
+      GoRoute(path: '/core/bales/cut', builder: (_, _) => const RecordCuttingScreen()),
 
       // POS + invoices — live.
       GoRoute(path: '/pos', builder: (_, _) => const PosScreen()),

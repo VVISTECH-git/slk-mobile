@@ -119,6 +119,12 @@ const _modules = [
     Icons.inventory_outlined,
     '/core/bales/new',
   ),
+  _Module(
+    'Record Cutting',
+    'Find a bale, log what was just cut',
+    Icons.content_cut,
+    '/core/bales/cut',
+  ),
 ];
 
 class _Tile extends StatelessWidget {
