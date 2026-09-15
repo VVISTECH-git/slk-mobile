@@ -11,15 +11,56 @@ import 'handover_providers.dart';
 
 const _inHouse = '';
 
-/// A scan problem, worded once. Every message from `checkThaanForSend` /
-/// `checkThaanForReceive` already names the Thaan it's about — "T00002041 is
-/// already out for Label Stitching.", 'No Thaan with code "XYZ".' — so
-/// prefixing the code again would just say it twice. Only genuinely
-/// code-blind failures (a dropped connection, mid-scan) need the code added
-/// back in, or there'd be no way to tell which scan they belonged to.
-String _describeProblem(String code, Object error) {
-  final message = '$error';
-  return message.contains(code) ? message : '$code — $message';
+/// One scan failure, kept structured (code + error) rather than formatted
+/// into a string right away — so failures that share a reason across many
+/// codes ("all 20 already out for Salava") can collapse into one line
+/// instead of twenty near-identical ones, in [summarizeProblems] below.
+class ScanProblem {
+  ScanProblem(this.code, Object error) : message = '$error';
+  final String code;
+  final String message;
+
+  bool get _mentionsCode => message.contains(code);
+
+  /// This problem alone. Every message from `checkThaanForSend` /
+  /// `checkThaanForReceive` already names the Thaan it's about —
+  /// "T00002041 is already out for Label Stitching." — so prefixing the
+  /// code again would just say it twice. Only genuinely code-blind
+  /// failures (a dropped connection, mid-scan) need the code added back
+  /// in, or there'd be no way to tell which scan they belonged to.
+  String get solo => _mentionsCode ? message : '$code — $message';
+
+  /// The message with this problem's own code removed — what several
+  /// problems that share a reason, but not a code, have in common.
+  String get _reason => _mentionsCode ? message.replaceAll(code, '').trim() : message;
+}
+
+/// "is out for Salava" → "are out for Salava" — the one grammatical fix
+/// needed to talk about several Thaans instead of one, for the handful of
+/// verb shapes the actual messages use.
+String _pluralizeReason(String reason) {
+  if (reason == 'No Thaan with code "".') return "aren't on file.";
+  if (reason.startsWith('is ')) return 'are ${reason.substring(3)}';
+  if (reason.startsWith("isn't ")) return "aren't ${reason.substring(6)}";
+  if (reason.startsWith('has ')) return 'have ${reason.substring(4)}';
+  return reason;
+}
+
+/// Groups by identical reason first — reading twenty repeats of the same
+/// sentence to learn one fact ("this whole batch is already out") is worse
+/// than reading it once.
+List<String> summarizeProblems(List<ScanProblem> problems) {
+  final groups = <String, List<ScanProblem>>{};
+  for (final p in problems) {
+    groups.putIfAbsent(p._reason, () => []).add(p);
+  }
+  return [
+    for (final group in groups.values)
+      if (group.length == 1)
+        group.first.solo
+      else
+        '${group.length} Thaans ${_pluralizeReason(group.first._reason)}'.trim(),
+  ];
 }
 
 /// Kora to Shelf, step three: a Thaan's trip through the stage pipeline.
@@ -73,7 +114,7 @@ class _HandoversScreenState extends State<HandoversScreen> {
 class _ScanOutcome<T> {
   _ScanOutcome({required this.resolved, required this.problems});
   final List<T> resolved;
-  final List<String> problems;
+  final List<ScanProblem> problems;
 }
 
 // ── Send ─────────────────────────────────────────────────────────────────
@@ -132,7 +173,7 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
     final repo = ref.read(handoverRepositoryProvider);
     String? stage = _stage;
     final resolved = <CoreThaanForSend>[];
-    final problems = <String>[];
+    final problems = <ScanProblem>[];
 
     for (final code in codes) {
       if (_items.any((t) => t.code == code) || resolved.any((t) => t.code == code)) continue;
@@ -141,7 +182,7 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
         stage ??= result.stage;
         resolved.add(result.thaan);
       } catch (e) {
-        problems.add(_describeProblem(code, e));
+        problems.add(ScanProblem(code, e));
       }
     }
 
@@ -149,23 +190,31 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
     return _ScanOutcome(resolved: resolved, problems: problems);
   }
 
-  void _showProblems(List<String> problems) {
+  void _showProblems(List<ScanProblem> problems) {
+    final lines = summarizeProblems(problems);
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (_) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+      isScrollControlled: true,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (_, scrollController) => SafeArea(
+          child: ListView(
+            controller: scrollController,
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             children: [
               Text(
                 'Not sent',
                 style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: context.p.danger),
               ),
               const SizedBox(height: 8),
-              for (final p in problems) Text(p, style: const TextStyle(fontSize: 13)),
+              for (final line in lines)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(line, style: const TextStyle(fontSize: 13)),
+                ),
             ],
           ),
         ),
@@ -255,7 +304,6 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
                     ],
                     onChanged: (v) => setState(() {
                       _vendorId = v ?? _inHouse;
-                      _items.clear();
                     }),
                   ),
                 ),
@@ -263,6 +311,17 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
             ],
           ),
         ),
+        if (_items.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => setState(_items.clear),
+                child: const Text('Clear'),
+              ),
+            ),
+          ),
         Expanded(
           child: _items.isEmpty
               ? Center(
@@ -343,14 +402,14 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     setState(() => _busy = true);
     final repo = ref.read(handoverRepositoryProvider);
     final resolved = <CoreThaanForReceive>[];
-    final problems = <String>[];
+    final problems = <ScanProblem>[];
 
     for (final code in codes) {
       if (_items.any((t) => t.code == code)) continue;
       try {
         resolved.add(await repo.lookupForReceive(code));
       } catch (e) {
-        problems.add(_describeProblem(code, e));
+        problems.add(ScanProblem(code, e));
       }
     }
 
@@ -360,22 +419,30 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
       _busy = false;
     });
     if (problems.isNotEmpty) {
+      final lines = summarizeProblems(problems);
       showModalBottomSheet<void>(
         context: context,
         showDragHandle: true,
-        builder: (_) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+        isScrollControlled: true,
+        builder: (_) => DraggableScrollableSheet(
+          initialChildSize: 0.5,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (_, scrollController) => SafeArea(
+            child: ListView(
+              controller: scrollController,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               children: [
                 Text(
                   'Not received',
                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: context.p.danger),
                 ),
                 const SizedBox(height: 8),
-                for (final p in problems) Text(p, style: const TextStyle(fontSize: 13)),
+                for (final line in lines)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(line, style: const TextStyle(fontSize: 13)),
+                  ),
               ],
             ),
           ),
