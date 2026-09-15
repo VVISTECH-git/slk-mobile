@@ -11,6 +11,17 @@ import 'handover_providers.dart';
 
 const _inHouse = '';
 
+/// A scan problem, worded once. Every message from `checkThaanForSend` /
+/// `checkThaanForReceive` already names the Thaan it's about — "T00002041 is
+/// already out for Label Stitching.", 'No Thaan with code "XYZ".' — so
+/// prefixing the code again would just say it twice. Only genuinely
+/// code-blind failures (a dropped connection, mid-scan) need the code added
+/// back in, or there'd be no way to tell which scan they belonged to.
+String _describeProblem(String code, Object error) {
+  final message = '$error';
+  return message.contains(code) ? message : '$code — $message';
+}
+
 /// Kora to Shelf, step three: a Thaan's trip through the stage pipeline.
 ///
 /// Everything here happens by scanning a Thaan's own QR code — the same
@@ -80,6 +91,18 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
   final _items = <CoreThaanForSend>[];
   bool _busy = false;
 
+  /// A vendor picked before the stage was known (or before it changed) might
+  /// not do the stage that just got locked in — every Thaan goes through
+  /// every stage in order, so a vendor who doesn't do this one was never a
+  /// real option for this batch.
+  void _dropIneligibleVendor() {
+    if (_vendorId == _inHouse || _stage == null) return;
+    final vendors = ref.read(coreVendorsProvider).value;
+    if (vendors == null) return;
+    final stillEligible = vendors.any((v) => v.id == _vendorId && v.stages.contains(_stage));
+    if (!stillEligible) _vendorId = _inHouse;
+  }
+
   Future<void> _scan() async {
     final codes = await Navigator.of(context).push<List<String>>(
       MaterialPageRoute(
@@ -93,6 +116,7 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
     if (!mounted) return;
     setState(() {
       _items.addAll(outcome.resolved);
+      _dropIneligibleVendor();
       _busy = false;
     });
     if (outcome.problems.isNotEmpty) _showProblems(outcome.problems);
@@ -117,7 +141,7 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
         stage ??= result.stage;
         resolved.add(result.thaan);
       } catch (e) {
-        problems.add('$code — $e');
+        problems.add(_describeProblem(code, e));
       }
     }
 
@@ -201,14 +225,15 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
                 child: PickerField(
                   label: 'Stage',
                   value: _stage ?? _inHouse,
-                  hint: 'Auto — first scan decides',
+                  hint: 'Auto',
                   allowClear: true,
                   options: [
-                    PickerOption(_inHouse, 'Auto — first scan decides'),
+                    PickerOption(_inHouse, 'Auto'),
                     ...plainOptions(kSendableStages),
                   ],
                   onChanged: (v) => setState(() {
                     _stage = (v == null || v == _inHouse) ? null : v;
+                    _dropIneligibleVendor();
                     _items.clear();
                   }),
                 ),
@@ -221,9 +246,12 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
                   data: (rows) => PickerField(
                     label: 'Vendor',
                     value: _vendorId,
+                    // Once a stage is known, only vendors who actually do it are
+                    // worth offering — see _dropIneligibleVendor.
                     options: [
-                      const PickerOption(_inHouse, 'In-house (no vendor)'),
-                      for (final v in rows) PickerOption(v.id, v.name),
+                      const PickerOption(_inHouse, 'In-house'),
+                      for (final v in rows)
+                        if (_stage == null || v.stages.contains(_stage)) PickerOption(v.id, v.name),
                     ],
                     onChanged: (v) => setState(() {
                       _vendorId = v ?? _inHouse;
@@ -322,7 +350,7 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
       try {
         resolved.add(await repo.lookupForReceive(code));
       } catch (e) {
-        problems.add('$code — $e');
+        problems.add(_describeProblem(code, e));
       }
     }
 
@@ -359,11 +387,21 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
   Future<void> _confirmReceive() async {
     if (_items.isEmpty) return;
 
+    // Named when the whole batch is coming back from one stage — the usual
+    // case, and the fact that actually matters to whoever is confirming
+    // this. A mixed batch (allowed — see the panel's own copy above) falls
+    // back to just the count, since no single stage name would be true of
+    // all of them.
+    final stages = _items.map((t) => t.stage).toSet();
+    final title = stages.length == 1
+        ? 'Receiving ${_items.length} Thaan${_items.length == 1 ? '' : 's'} after ${stages.first}?'
+        : 'Receive ${_items.length} Thaan${_items.length == 1 ? '' : 's'}?';
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Receive ${_items.length} Thaan${_items.length == 1 ? '' : 's'}?'),
-        content: const Text('Any piece back from a vendor is billed at their rate for that stage.'),
+        title: Text(title),
+        content: const Text('Confirm all of these are physically back in hand.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Receive')),
