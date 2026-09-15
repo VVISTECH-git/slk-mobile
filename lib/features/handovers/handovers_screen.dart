@@ -11,6 +11,14 @@ import 'handover_providers.dart';
 
 const _inHouse = '';
 
+/// Distinct from [_inHouse] — that sentinel already means "Auto" on the
+/// Stage picker, and reusing it for the Vendor picker's "In-house" would
+/// make an unselected [_SendPanelState._vendorId] (`null`) indistinguishable
+/// from "in-house, chosen on purpose". Sending in-house has to be picked,
+/// the same as sending to a vendor — never fallen into by not touching the
+/// picker at all.
+const _vendorInHouse = 'in-house';
+
 /// One scan failure, kept structured (code + error) rather than formatted
 /// into a string right away — so failures that share a reason across many
 /// codes ("all 20 already out for Salava") can collapse into one line
@@ -128,20 +136,23 @@ class _SendPanel extends ConsumerStatefulWidget {
 
 class _SendPanelState extends ConsumerState<_SendPanel> {
   String? _stage;
-  String _vendorId = _inHouse;
+  // Null means not chosen yet — see _vendorInHouse for why this can't
+  // default to "in-house".
+  String? _vendorId;
   final _items = <CoreThaanForSend>[];
   bool _busy = false;
 
   /// A vendor picked before the stage was known (or before it changed) might
   /// not do the stage that just got locked in — every Thaan goes through
   /// every stage in order, so a vendor who doesn't do this one was never a
-  /// real option for this batch.
+  /// real option for this batch. Falls back to unselected, not in-house: a
+  /// vendor becoming invalid is a reason to make the reader choose again.
   void _dropIneligibleVendor() {
-    if (_vendorId == _inHouse || _stage == null) return;
+    if (_vendorId == null || _vendorId == _vendorInHouse || _stage == null) return;
     final vendors = ref.read(coreVendorsProvider).value;
     if (vendors == null) return;
     final stillEligible = vendors.any((v) => v.id == _vendorId && v.stages.contains(_stage));
-    if (!stillEligible) _vendorId = _inHouse;
+    if (!stillEligible) _vendorId = null;
   }
 
   Future<void> _scan() async {
@@ -223,7 +234,7 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
   }
 
   Future<void> _confirmSend() async {
-    if (_items.isEmpty || _stage == null) return;
+    if (_items.isEmpty || _stage == null || _vendorId == null) return;
     final stage = _stage!;
 
     final ok = await showDialog<bool>(
@@ -231,7 +242,7 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
       builder: (_) => AlertDialog(
         title: Text('Send ${_items.length} Thaan${_items.length == 1 ? '' : 's'} for $stage?'),
         content: Text(
-          _vendorId == _inHouse
+          _vendorId == _vendorInHouse
               ? 'Going to in-house.'
               : 'Going to ${ref.read(coreVendorsProvider).value?.firstWhere((v) => v.id == _vendorId).name ?? 'that vendor'}.',
         ),
@@ -247,7 +258,7 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
     try {
       final message = await ref.read(handoverRepositoryProvider).sendBatch(
             stage: stage,
-            vendorId: _vendorId == _inHouse ? null : _vendorId,
+            vendorId: _vendorId == _vendorInHouse ? null : _vendorId,
             thaanIds: [for (final t in _items) t.id],
           );
       if (!mounted) return;
@@ -295,15 +306,16 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
                   data: (rows) => PickerField(
                     label: 'Vendor',
                     value: _vendorId,
+                    hint: 'Choose…',
                     // Once a stage is known, only vendors who actually do it are
                     // worth offering — see _dropIneligibleVendor.
                     options: [
-                      const PickerOption(_inHouse, 'In-house'),
+                      const PickerOption(_vendorInHouse, 'In-house'),
                       for (final v in rows)
                         if (_stage == null || v.stages.contains(_stage)) PickerOption(v.id, v.name),
                     ],
                     onChanged: (v) => setState(() {
-                      _vendorId = v ?? _inHouse;
+                      _vendorId = v;
                     }),
                   ),
                 ),
@@ -361,7 +373,7 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: _busy || _items.isEmpty || _stage == null ? null : _confirmSend,
+                    onPressed: _busy || _items.isEmpty || _stage == null || _vendorId == null ? null : _confirmSend,
                     icon: _busy
                         ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : const Icon(Icons.north_east),
