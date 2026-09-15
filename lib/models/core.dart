@@ -904,3 +904,88 @@ class CoreBale {
         thaanCount: (json['thaanCount'] as num?)?.toInt() ?? 0,
       );
 }
+
+/// Who a batch can be sent to — Handovers' Send screen's vendor picker.
+/// Deliberately thin: id, name and which stages they do, not the billing
+/// totals `/vendors` on the web carries — a floor phone sending a batch has
+/// no reason to read those.
+class CoreVendor {
+  const CoreVendor({required this.id, required this.name, required this.stages});
+
+  final String id;
+  final String name;
+
+  /// Which stage(s) this vendor normally does — informational for the
+  /// picker, not enforced: any vendor can be picked for any stage, the same
+  /// as the web screen allows.
+  final List<String> stages;
+
+  factory CoreVendor.fromJson(Map<String, dynamic> json) => CoreVendor(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        stages: [for (final s in (json['stages'] as List? ?? const [])) '$s'],
+      );
+}
+
+/// One Thaan, as a Send-screen scan answers for it — the same shape
+/// `ThaanForSend` on the web carries.
+class CoreThaanForSend {
+  const CoreThaanForSend({
+    required this.id,
+    required this.code,
+    required this.baleCode,
+    required this.baleType,
+    required this.itemName,
+  });
+
+  final String id;
+  final String code;
+  final String baleCode;
+  final String baleType;
+  final String itemName;
+
+  factory CoreThaanForSend.fromJson(Map<String, dynamic> json) => CoreThaanForSend(
+        id: json['id'] as String,
+        code: json['code'] as String,
+        baleCode: json['baleCode'] as String,
+        baleType: json['baleType'] as String,
+        itemName: json['itemName'] as String,
+      );
+}
+
+/// One Thaan, as a Receive-screen scan answers for it — [CoreThaanForSend]'s
+/// fields plus which stage and vendor it's actually out for right now.
+class CoreThaanForReceive {
+  const CoreThaanForReceive({
+    required this.id,
+    required this.code,
+    required this.baleCode,
+    required this.baleType,
+    required this.itemName,
+    required this.stage,
+    this.vendorId,
+    required this.vendorName,
+  });
+
+  final String id;
+  final String code;
+  final String baleCode;
+  final String baleType;
+  final String itemName;
+  final String stage;
+
+  /// Null means in-house — see [vendorName], which reads "In-house" then.
+  final String? vendorId;
+  final String vendorName;
+
+  factory CoreThaanForReceive.fromJson(Map<String, dynamic> json) => CoreThaanForReceive(
+        id: json['id'] as String,
+        code: json['code'] as String,
+        baleCode: json['baleCode'] as String,
+        baleType: json['baleType'] as String,
+        itemName: json['itemName'] as String,
+        stage: json['stage'] as String,
+        vendorId: json['vendorId'] as String?,
+        vendorName: json['vendorName'] as String,
+      );
+}

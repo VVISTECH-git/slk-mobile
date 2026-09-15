@@ -125,6 +125,12 @@ const _modules = [
     Icons.content_cut,
     '/core/bales/cut',
   ),
+  _Module(
+    'Handovers',
+    'Scan a Thaan out, scan it back',
+    Icons.sync_alt,
+    '/core/handovers',
+  ),
 ];
 
 class _Tile extends StatelessWidget {

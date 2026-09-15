@@ -15,6 +15,7 @@ import 'features/category/category_list_screen.dart';
 import 'features/category/category_form_screen.dart';
 import 'features/bales/bale_intake_screen.dart';
 import 'features/bales/record_cutting_screen.dart';
+import 'features/handovers/handovers_screen.dart';
 import 'features/core/core_auth.dart';
 import 'features/core/core_home_screen.dart';
 import 'features/core/core_sign_in_screen.dart';
@@ -183,6 +184,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Recording Thaans cut from a bale already on file — its own screen,
       // not a section of the intake one; see record_cutting_screen.dart.
       GoRoute(path: '/core/bales/cut', builder: (_, _) => const RecordCuttingScreen()),
+
+      // A Thaan's trip through the stage pipeline — send it out, scan it
+      // back. See handovers_screen.dart for why this lives on the phone
+      // and not only the web.
+      GoRoute(path: '/core/handovers', builder: (_, _) => const HandoversScreen()),
 
       // POS + invoices — live.
       GoRoute(path: '/pos', builder: (_, _) => const PosScreen()),
