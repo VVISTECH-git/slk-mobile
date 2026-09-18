@@ -1026,6 +1026,187 @@ class CoreVendor {
       );
 }
 
+/// One vendor with what's owed and what's been paid — Finance Manager's
+/// own vendor list on mobile. Narrows slk-core's own `VendorRow`
+/// (apps/web/src/lib/vendors.ts) to what a phone needs.
+class CoreVendorFinance {
+  const CoreVendorFinance({
+    required this.id,
+    required this.code,
+    required this.name,
+    required this.primaryPhone,
+    required this.secondaryPhone,
+    required this.village,
+    required this.stages,
+    required this.totalEarned,
+    required this.totalPaid,
+    required this.balanceDue,
+    required this.currentlyHolding,
+  });
+
+  final String id;
+  final String code;
+  final String name;
+  final String? primaryPhone;
+  final String? secondaryPhone;
+  final String? village;
+  final List<String> stages;
+  final double totalEarned;
+  final double totalPaid;
+  final double balanceDue;
+  final int currentlyHolding;
+
+  factory CoreVendorFinance.fromJson(Map<String, dynamic> json) => CoreVendorFinance(
+        id: json['id'] as String,
+        code: json['code'] as String,
+        name: json['name'] as String,
+        primaryPhone: json['primaryPhone'] as String?,
+        secondaryPhone: json['secondaryPhone'] as String?,
+        village: json['village'] as String?,
+        stages: [for (final s in (json['stages'] as List? ?? const [])) '$s'],
+        totalEarned: (json['totalEarned'] as num).toDouble(),
+        totalPaid: (json['totalPaid'] as num).toDouble(),
+        balanceDue: (json['balanceDue'] as num).toDouble(),
+        currentlyHolding: json['currentlyHolding'] as int,
+      );
+}
+
+/// One entry in a vendor's ledger — a billed transaction or a payment, the
+/// same rows slk-core's own `VendorLedgerEntry` carries
+/// (apps/web/src/lib/vendors.ts). `amount` null on a transaction means "not
+/// priced yet" (see [status]) — always a real number on a payment.
+class CoreVendorLedgerEntry {
+  const CoreVendorLedgerEntry({
+    required this.kind,
+    required this.id,
+    required this.date,
+    required this.stage,
+    required this.pieceCount,
+    required this.amount,
+    required this.notes,
+    required this.baleCodes,
+    required this.approvedAt,
+    required this.paidAt,
+  });
+
+  /// 'transaction' | 'payment'.
+  final String kind;
+  final String id;
+  final String date;
+  final String? stage;
+  final int? pieceCount;
+  final double? amount;
+  final String? notes;
+  final List<String>? baleCodes;
+  final String? approvedAt;
+  final String? paidAt;
+
+  bool get isTransaction => kind == 'transaction';
+
+  /// 'needs_pricing' | 'unapproved' | 'approved' | 'paid' — same vocabulary
+  /// as slk-core's own `vendorTransactionStatus` (lib/vendor-status.ts).
+  /// Null for a payment row, which has no status of its own.
+  String? get status {
+    if (!isTransaction) return null;
+    if (amount == null) return 'needs_pricing';
+    if (paidAt != null) return 'paid';
+    if (approvedAt != null) return 'approved';
+    return 'unapproved';
+  }
+
+  factory CoreVendorLedgerEntry.fromJson(Map<String, dynamic> json) => CoreVendorLedgerEntry(
+        kind: json['kind'] as String,
+        id: json['id'] as String,
+        date: json['date'] as String,
+        stage: json['stage'] as String?,
+        pieceCount: json['pieceCount'] as int?,
+        amount: (json['amount'] as num?)?.toDouble(),
+        notes: json['notes'] as String?,
+        baleCodes: json['baleCodes'] == null ? null : [for (final b in json['baleCodes'] as List) '$b'],
+        approvedAt: json['approvedAt'] as String?,
+        paidAt: json['paidAt'] as String?,
+      );
+}
+
+/// A Thaan flagged damaged against one vendor — same rows slk-core's own
+/// `DamagedThaanRow` carries (apps/web/src/lib/thaan-damage.ts).
+class CoreDamagedThaan {
+  const CoreDamagedThaan({
+    required this.id,
+    required this.thaanCode,
+    required this.baleCode,
+    required this.stage,
+    required this.notes,
+    required this.flaggedAt,
+    required this.flaggedByName,
+    required this.addressedAt,
+    required this.writtenOffAt,
+  });
+
+  final String id;
+  final String? thaanCode;
+  final String baleCode;
+  final String? stage;
+  final String? notes;
+  final String flaggedAt;
+  final String? flaggedByName;
+  final String? addressedAt;
+  final String? writtenOffAt;
+
+  /// 'flagged' | 'addressed' | 'written_off' — same vocabulary as
+  /// slk-core's own `damagedThaanStatus` (lib/damaged-status.ts).
+  String get status {
+    if (writtenOffAt != null) return 'written_off';
+    if (addressedAt != null) return 'addressed';
+    return 'flagged';
+  }
+
+  factory CoreDamagedThaan.fromJson(Map<String, dynamic> json) => CoreDamagedThaan(
+        id: json['id'] as String,
+        thaanCode: json['thaanCode'] as String?,
+        baleCode: json['baleCode'] as String,
+        stage: json['stage'] as String?,
+        notes: json['notes'] as String?,
+        flaggedAt: json['flaggedAt'] as String,
+        flaggedByName: json['flaggedByName'] as String?,
+        addressedAt: json['addressedAt'] as String?,
+        writtenOffAt: json['writtenOffAt'] as String?,
+      );
+}
+
+/// How many Thaans currently sit at one point in the pipeline — "Not
+/// started", one of the stage names, or "Finished". Same rows slk-core's
+/// own `StageSummaryRow` carries (apps/web/src/lib/thaans.ts).
+class CoreStageSummaryRow {
+  const CoreStageSummaryRow({required this.bucket, required this.count});
+
+  final String bucket;
+  final int count;
+
+  factory CoreStageSummaryRow.fromJson(Map<String, dynamic> json) => CoreStageSummaryRow(
+        bucket: json['bucket'] as String,
+        count: json['count'] as int,
+      );
+}
+
+/// One Thaan behind a stage-summary bucket's count — the drill-down. Same
+/// rows slk-core's own `StageThaanRow` carries.
+class CoreStageThaan {
+  const CoreStageThaan({required this.thaanCode, required this.baleCode, required this.vendorName});
+
+  final String? thaanCode;
+  final String baleCode;
+
+  /// Who currently has it, if this bucket means "out for" that stage — null otherwise.
+  final String? vendorName;
+
+  factory CoreStageThaan.fromJson(Map<String, dynamic> json) => CoreStageThaan(
+        thaanCode: json['thaanCode'] as String?,
+        baleCode: json['baleCode'] as String,
+        vendorName: json['vendorName'] as String?,
+      );
+}
+
 /// One Thaan, as a Send-screen scan answers for it — the same shape
 /// `ThaanForSend` on the web carries.
 class CoreThaanForSend {

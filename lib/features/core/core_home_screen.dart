@@ -203,6 +203,20 @@ const _modules = [
     '/core/thaans/scan',
     ['Bale Custodian', 'Handler'],
   ),
+  _Module(
+    'Vendor Ledger',
+    'Price, approve and pay vendor work',
+    Icons.receipt_long_outlined,
+    '/core/vendors',
+    ['Finance Manager'],
+  ),
+  _Module(
+    'Stage Summary',
+    'How many Thaans sit at each stage, and which',
+    Icons.bar_chart_outlined,
+    '/core/thaans/stage-summary',
+    ['Production Manager', 'Operations Manager'],
+  ),
 ];
 
 class _Tile extends StatelessWidget {

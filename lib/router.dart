@@ -18,6 +18,9 @@ import 'features/bales/record_cutting_screen.dart';
 import 'features/handovers/handovers_screen.dart';
 import 'features/thaans/print_labels_screen.dart';
 import 'features/thaans/scan_thaan_screen.dart';
+import 'features/stage_summary/stage_summary_screen.dart';
+import 'features/vendors/vendor_detail_screen.dart';
+import 'features/vendors/vendor_ledger_screen.dart';
 import 'features/core/core_auth.dart';
 import 'features/core/core_home_screen.dart';
 import 'features/core/core_sign_in_screen.dart';
@@ -199,6 +202,22 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Read-only: scan or type a Thaan's code, see its bale, stage and
       // status. Never moves anything — Handovers' own scanning does that.
       GoRoute(path: '/core/thaans/scan', builder: (_, _) => const ScanThaanScreen()),
+
+      // Finance Manager: price, approve and pay vendor work, and settle
+      // damaged Thaans per vendor. Static before dynamic, same reasoning
+      // as /core/records/new above.
+      GoRoute(path: '/core/vendors', builder: (_, _) => const VendorLedgerScreen()),
+      GoRoute(
+        path: '/core/vendors/:id',
+        builder: (_, state) => VendorDetailScreen(
+          vendorId: state.pathParameters['id']!,
+          vendorName: state.extra as String?,
+        ),
+      ),
+
+      // Production Manager / Operations Manager: how many Thaans currently
+      // sit at each point in the pipeline, and which ones.
+      GoRoute(path: '/core/thaans/stage-summary', builder: (_, _) => const StageSummaryScreen()),
 
       // POS + invoices — live.
       GoRoute(path: '/pos', builder: (_, _) => const PosScreen()),
