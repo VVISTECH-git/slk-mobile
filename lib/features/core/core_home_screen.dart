@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/core.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/theme_button.dart';
 import 'core_auth.dart';
 
 /// What the phone can do, on one screen.
@@ -41,6 +42,7 @@ class CoreHomeScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('SLK Stock'),
         actions: [
+          const ThemeButton(),
           IconButton(
             tooltip: 'Sign out',
             icon: const Icon(Icons.logout),
