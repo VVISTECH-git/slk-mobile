@@ -105,6 +105,17 @@ class _StageRow extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (row.oldestDaysWaiting != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Oldest waiting ${row.oldestDaysWaiting} day${row.oldestDaysWaiting == 1 ? "" : "s"} (since ${row.oldestSince})',
+                    style: TextStyle(
+                      color: row.oldestDaysWaiting! >= 14 ? p.danger : p.textSecondary,
+                      fontWeight: row.oldestDaysWaiting! >= 14 ? FontWeight.w700 : FontWeight.w400,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(3),

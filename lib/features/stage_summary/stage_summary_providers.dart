@@ -16,10 +16,10 @@ final stageSummaryProvider = FutureProvider.autoDispose<List<CoreStageSummaryRow
   ];
 });
 
-/// The actual Thaans behind one bucket's count — fetched on drill-down, not baked into the summary.
-final stageThaansProvider = FutureProvider.autoDispose.family<List<CoreStageThaan>, String>((ref, bucket) async {
+/// One bucket's Thaans, grouped by vendor and bale — fetched on drill-down, not baked into the summary.
+final stageGroupsProvider = FutureProvider.autoDispose.family<List<CoreStageGroup>, String>((ref, bucket) async {
   final data = await ref.watch(coreApiProvider).get('/thaans/stage-summary/thaans', query: {'bucket': bucket});
   return [
-    for (final row in (data as List)) CoreStageThaan.fromJson((row as Map).cast<String, dynamic>()),
+    for (final row in (data as List)) CoreStageGroup.fromJson((row as Map).cast<String, dynamic>()),
   ];
 });

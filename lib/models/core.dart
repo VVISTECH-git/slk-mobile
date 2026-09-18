@@ -1175,35 +1175,58 @@ class CoreDamagedThaan {
 }
 
 /// How many Thaans currently sit at one point in the pipeline — "Not
-/// started", one of the stage names, or "Finished". Same rows slk-core's
-/// own `StageSummaryRow` carries (apps/web/src/lib/thaans.ts).
+/// started", one of the stage names, or "Finished" — and how long the
+/// oldest one there has been waiting. Same rows slk-core's own
+/// `StageSummaryRow` carries (apps/web/src/lib/thaans.ts). A count alone
+/// means nothing at real volume; `oldestDaysWaiting` is the actual signal.
 class CoreStageSummaryRow {
-  const CoreStageSummaryRow({required this.bucket, required this.count});
+  const CoreStageSummaryRow({
+    required this.bucket,
+    required this.count,
+    required this.oldestDaysWaiting,
+    required this.oldestSince,
+  });
 
   final String bucket;
   final int count;
+  final int? oldestDaysWaiting;
+  final String? oldestSince;
 
   factory CoreStageSummaryRow.fromJson(Map<String, dynamic> json) => CoreStageSummaryRow(
         bucket: json['bucket'] as String,
         count: json['count'] as int,
+        oldestDaysWaiting: json['oldestDaysWaiting'] as int?,
+        oldestSince: json['oldestSince'] as String?,
       );
 }
 
-/// One Thaan behind a stage-summary bucket's count — the drill-down. Same
-/// rows slk-core's own `StageThaanRow` carries.
-class CoreStageThaan {
-  const CoreStageThaan({required this.thaanCode, required this.baleCode, required this.vendorName});
+/// One vendor-and-bale group behind a stage-summary bucket's count — the
+/// drill-down, grouped rather than one row per Thaan so a bucket with
+/// hundreds in it is still readable. Same rows slk-core's own
+/// `StageGroupRow` carries.
+class CoreStageGroup {
+  const CoreStageGroup({
+    required this.baleCode,
+    required this.vendorName,
+    required this.count,
+    required this.daysWaiting,
+    required this.since,
+  });
 
-  final String? thaanCode;
   final String baleCode;
 
   /// Who currently has it, if this bucket means "out for" that stage — null otherwise.
   final String? vendorName;
+  final int count;
+  final int? daysWaiting;
+  final String? since;
 
-  factory CoreStageThaan.fromJson(Map<String, dynamic> json) => CoreStageThaan(
-        thaanCode: json['thaanCode'] as String?,
+  factory CoreStageGroup.fromJson(Map<String, dynamic> json) => CoreStageGroup(
         baleCode: json['baleCode'] as String,
         vendorName: json['vendorName'] as String?,
+        count: json['count'] as int,
+        daysWaiting: json['daysWaiting'] as int?,
+        since: json['since'] as String?,
       );
 }
 
