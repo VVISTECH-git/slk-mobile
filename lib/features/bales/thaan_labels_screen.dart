@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../theme/app_theme.dart';
@@ -11,10 +10,11 @@ import 'thaan_labels_pdf.dart';
 /// Printing a bale's QR-coded Thaan labels — its own screen, not a button
 /// buried in Record Cutting's sheet. A thermal roll running out of ink
 /// partway through a real batch (500 Thaans is well within range here)
-/// needs a way to pick up where it stopped — a plain From/To range, not a
-/// list of every code on screen or a picker wheel scrolling through
-/// hundreds of options. Mirrors the same From/To idea slk-core's own
-/// `/thaans/print/[baleId]` page uses.
+/// needs a way to pick up where it stopped — by the Thaan code on the last
+/// label that actually printed, which is the only thing physically in
+/// front of whoever's reloading the printer. Not a position number: nobody
+/// standing at a printer knows "#50", they know "T00002120". Mirrors the
+/// same idea slk-core's own `/thaans/print/[baleId]` page uses.
 class ThaanLabelsScreen extends ConsumerStatefulWidget {
   const ThaanLabelsScreen({super.key, required this.baleId});
   final String baleId;
@@ -28,7 +28,7 @@ class _ThaanLabelsScreenState extends ConsumerState<ThaanLabelsScreen> {
   List<String> _codes = [];
   bool _loading = true;
 
-  final _from = TextEditingController(text: '1');
+  final _from = TextEditingController();
   final _to = TextEditingController();
   bool _printing = false;
 
@@ -52,7 +52,10 @@ class _ThaanLabelsScreenState extends ConsumerState<ThaanLabelsScreen> {
       setState(() {
         _baleCode = baleCode;
         _codes = codes;
-        _to.text = '${codes.length}';
+        if (codes.isNotEmpty) {
+          _from.text = codes.first;
+          _to.text = codes.last;
+        }
         _loading = false;
       });
     } catch (e) {
@@ -62,24 +65,20 @@ class _ThaanLabelsScreenState extends ConsumerState<ThaanLabelsScreen> {
     }
   }
 
-  /// 1-based, clamped into range — typing garbage or an out-of-range number
-  /// never crashes the slice below, it just snaps back to something valid.
-  int get _fromIndex {
-    if (_codes.isEmpty) return 1;
-    return (int.tryParse(_from.text) ?? 1).clamp(1, _codes.length);
-  }
+  /// -1 when what's typed doesn't match any Thaan on this bale — codes are
+  /// typed by hand off a physical label, so a typo is the normal failure
+  /// mode to guard against, not an edge case.
+  int get _fromIndex => _codes.indexOf(_from.text.trim().toUpperCase());
+  int get _toIndex => _codes.indexOf(_to.text.trim().toUpperCase());
 
-  int get _toIndex {
-    if (_codes.isEmpty) return 1;
-    return (int.tryParse(_to.text) ?? _codes.length).clamp(_fromIndex, _codes.length);
-  }
+  bool get _rangeValid => _fromIndex != -1 && _toIndex != -1 && _fromIndex <= _toIndex;
 
   Future<void> _print() async {
     setState(() => _printing = true);
     try {
       await printThaanLabels(
         baleCode: _baleCode ?? '',
-        codes: _codes.sublist(_fromIndex - 1, _toIndex),
+        codes: _codes.sublist(_fromIndex, _toIndex + 1),
       );
     } catch (e) {
       if (mounted) showError(context, e);
@@ -91,7 +90,7 @@ class _ThaanLabelsScreenState extends ConsumerState<ThaanLabelsScreen> {
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    final count = _codes.isEmpty ? 0 : _toIndex - _fromIndex + 1;
+    final count = _rangeValid ? _toIndex - _fromIndex + 1 : 0;
 
     return Scaffold(
       appBar: AppBar(
@@ -120,13 +119,16 @@ class _ThaanLabelsScreenState extends ConsumerState<ThaanLabelsScreen> {
                     ),
                     const SizedBox(height: 16),
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
                           child: TextField(
                             controller: _from,
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                            decoration: const InputDecoration(labelText: 'From #'),
+                            textCapitalization: TextCapitalization.characters,
+                            decoration: InputDecoration(
+                              labelText: 'From code',
+                              errorText: _fromIndex == -1 ? 'Not on this bale' : null,
+                            ),
                             onChanged: (_) => setState(() {}),
                           ),
                         ),
@@ -134,9 +136,11 @@ class _ThaanLabelsScreenState extends ConsumerState<ThaanLabelsScreen> {
                         Expanded(
                           child: TextField(
                             controller: _to,
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                            decoration: const InputDecoration(labelText: 'To #'),
+                            textCapitalization: TextCapitalization.characters,
+                            decoration: InputDecoration(
+                              labelText: 'To code',
+                              errorText: _toIndex == -1 ? 'Not on this bale' : null,
+                            ),
                             onChanged: (_) => setState(() {}),
                           ),
                         ),
@@ -145,10 +149,12 @@ class _ThaanLabelsScreenState extends ConsumerState<ThaanLabelsScreen> {
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
-                        count == _codes.length
-                            ? 'Printing all of them.'
-                            : 'Printer ran out partway? Set From to where it stopped — '
-                              '#$_fromIndex is ${_codes[_fromIndex - 1]}, #$_toIndex is ${_codes[_toIndex - 1]}.',
+                        !_rangeValid && _fromIndex != -1 && _toIndex != -1
+                            ? 'From has to come before To — swap them.'
+                            : count == _codes.length
+                                ? 'Printing all of them.'
+                                : "Printer ran out partway? Set From to the last label that actually printed — "
+                                  'labels usually resume right after it.',
                         style: TextStyle(fontSize: 12, color: p.textMuted),
                       ),
                     ),
@@ -160,7 +166,7 @@ class _ThaanLabelsScreenState extends ConsumerState<ThaanLabelsScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: FilledButton.icon(
-                  onPressed: _printing || count == 0 ? null : _print,
+                  onPressed: _printing || !_rangeValid ? null : _print,
                   icon: _printing
                       ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Icon(Icons.print_outlined),
