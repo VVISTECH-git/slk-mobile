@@ -20,11 +20,14 @@ class ThemeButton extends StatelessWidget {
   }
 }
 
-/// Shows the theme picker as a modal bottom sheet.
+/// Shows the theme picker as a modal bottom sheet. `isScrollControlled` lets
+/// it grow past the default sheet height — needed once `SlkThemes.all` holds
+/// more entries than fit on a short phone in one screen.
 Future<void> showThemeSheet(BuildContext context) {
   return showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
+    isScrollControlled: true,
     backgroundColor: context.p.surface1,
     builder: (_) => const _ThemeSheet(),
   );
@@ -38,29 +41,41 @@ class _ThemeSheet extends ConsumerWidget {
     final current = ref.watch(themeControllerProvider);
     return SafeArea(
       top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      // Bounded, not unbounded: the title stays put and only the swatch
+      // list scrolls once SlkThemes.all outgrows the sheet's own height —
+      // an unbounded Column here is what overflowed off the bottom of the
+      // screen the moment a 6th theme was added.
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.only(bottom: 12, left: 4),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Text('Theme',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: context.p.text)),
             ),
-            for (final t in SlkThemes.all)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _SheetTile(
-                  theme: t,
-                  selected: t.id == current.id,
-                  onTap: () {
-                    ref.read(themeControllerProvider.notifier).select(t);
-                    Navigator.of(context).pop();
-                  },
-                ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                children: [
+                  for (final t in SlkThemes.all)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _SheetTile(
+                        theme: t,
+                        selected: t.id == current.id,
+                        onTap: () {
+                          ref.read(themeControllerProvider.notifier).select(t);
+                          Navigator.of(context).pop();
+                        },
+                      ),
+                    ),
+                ],
               ),
+            ),
           ],
         ),
       ),
