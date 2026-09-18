@@ -188,10 +188,17 @@ const _modules = [
     ['Bale Custodian', 'Handler'],
   ),
   _Module(
-    'Thaan QR Codes',
-    'Print labels, or scan one to see what it is',
-    Icons.qr_code_2,
-    '/core/thaans/qr',
+    'Print QR Labels',
+    "Pick a bale, print the codes it's already generated",
+    Icons.print_outlined,
+    '/core/thaans/print',
+    ['Bale Custodian'],
+  ),
+  _Module(
+    'Scan a Thaan',
+    'See a printed label\'s bale, stage and status',
+    Icons.qr_code_scanner,
+    '/core/thaans/scan',
     ['Bale Custodian', 'Handler'],
   ),
 ];

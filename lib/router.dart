@@ -16,7 +16,8 @@ import 'features/category/category_form_screen.dart';
 import 'features/bales/bale_intake_screen.dart';
 import 'features/bales/record_cutting_screen.dart';
 import 'features/handovers/handovers_screen.dart';
-import 'features/thaans/thaan_qr_hub_screen.dart';
+import 'features/thaans/print_labels_screen.dart';
+import 'features/thaans/scan_thaan_screen.dart';
 import 'features/core/core_auth.dart';
 import 'features/core/core_home_screen.dart';
 import 'features/core/core_sign_in_screen.dart';
@@ -191,9 +192,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       // and not only the web.
       GoRoute(path: '/core/handovers', builder: (_, _) => const HandoversScreen()),
 
-      // Print a bale's QR labels, or scan one to see what it is — see
-      // thaan_qr_hub_screen.dart.
-      GoRoute(path: '/core/thaans/qr', builder: (_, _) => const ThaanQrHubScreen()),
+      // Print a bale's already-generated QR labels — pick a bale, land on
+      // the same ThaanLabelsScreen Record Cutting's own print button opens.
+      GoRoute(path: '/core/thaans/print', builder: (_, _) => const PrintLabelsScreen()),
+
+      // Read-only: scan or type a Thaan's code, see its bale, stage and
+      // status. Never moves anything — Handovers' own scanning does that.
+      GoRoute(path: '/core/thaans/scan', builder: (_, _) => const ScanThaanScreen()),
 
       // POS + invoices — live.
       GoRoute(path: '/pos', builder: (_, _) => const PosScreen()),
