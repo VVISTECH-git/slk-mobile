@@ -44,8 +44,17 @@ class _StageSummaryScreenState extends ConsumerState<StageSummaryScreen> {
               child: _ViewToggle(view: _view, onChanged: (v) => setState(() => _view = v)),
             ),
           Expanded(
-            child: showToggle && _view == _View.byType
-                ? const _TypeList()
+            child: showToggle
+                // Both sides stay mounted (and so keep watching their own
+                // provider, which is what stops `.autoDispose` from tearing
+                // either one down) the whole time this screen is open —
+                // only the currently-selected one is actually visible.
+                // Toggling is then just a paint switch, not a re-fetch.
+                ? IndexedStack(
+                    index: _view == _View.byStage ? 0 : 1,
+                    sizing: StackFit.expand,
+                    children: const [_StageList(baleType: null), _TypeList()],
+                  )
                 : _StageList(baleType: widget.baleType),
           ),
         ],

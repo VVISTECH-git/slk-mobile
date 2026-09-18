@@ -9,19 +9,21 @@ import '../core/core_auth.dart';
 /// `/api/v1/thaans/{stage,type}-summary*`, which wraps slk-core's own
 /// `loadStageSummary`/`loadThaansInBucket`/`loadTypeSummary`
 /// (apps/web/src/lib/thaans.ts).
-
-/// None of these three are `.autoDispose`, on purpose: the Stage Summary
-/// screen's By Stage / By Type toggle only ever mounts one side at a time,
-/// so an `.autoDispose` provider backing the hidden side gets torn down the
-/// moment it stops being watched — every single tap of the toggle would
-/// then refetch from scratch and show a fresh loading spinner, even though
-/// nothing on the server had changed since the last look. Kept alive for
-/// the app's lifetime instead; pull-to-refresh (`ref.invalidate`) still
-/// forces a real refetch when the data actually might have moved.
+///
+/// All three are `.autoDispose` — a fresh fetch every time Stage Summary is
+/// actually opened, not the stale-until-someone-remembers-to-pull-to-refresh
+/// bug an earlier, non-autoDispose version of this file had (a bale's type
+/// changed on the web; the app kept showing the old breakdown indefinitely).
+/// The By Stage / By Type toggle stays instant anyway: stage_summary_screen
+/// keeps both sides mounted in an `IndexedStack` rather than building only
+/// the active one, so neither provider is ever unwatched — and therefore
+/// never torn down — just by flipping the toggle. Only actually leaving the
+/// screen disposes them, which is exactly when a stale value stops mattering
+/// and a fresh one is wanted next time.
 
 /// How many Thaans currently sit at each point in the pipeline — the whole
 /// business when [baleType] is null, one bale type's own pipeline when set.
-final stageSummaryProvider = FutureProvider.family<List<CoreStageSummaryRow>, String?>((ref, baleType) async {
+final stageSummaryProvider = FutureProvider.autoDispose.family<List<CoreStageSummaryRow>, String?>((ref, baleType) async {
   final data = await ref.watch(coreApiProvider).get('/thaans/stage-summary', query: {if (baleType != null) 'type': baleType});
   return [
     for (final row in (data as List)) CoreStageSummaryRow.fromJson((row as Map).cast<String, dynamic>()),
@@ -29,7 +31,8 @@ final stageSummaryProvider = FutureProvider.family<List<CoreStageSummaryRow>, St
 });
 
 /// One bucket's Thaans, grouped by vendor and bale — fetched on drill-down, not baked into the summary.
-final stageGroupsProvider = FutureProvider.family<List<CoreStageGroup>, ({String bucket, String? baleType})>((ref, key) async {
+final stageGroupsProvider =
+    FutureProvider.autoDispose.family<List<CoreStageGroup>, ({String bucket, String? baleType})>((ref, key) async {
   final data = await ref.watch(coreApiProvider).get('/thaans/stage-summary/thaans', query: {
     'bucket': key.bucket,
     if (key.baleType != null) 'type': key.baleType,
@@ -40,7 +43,7 @@ final stageGroupsProvider = FutureProvider.family<List<CoreStageGroup>, ({String
 });
 
 /// Every bale type's own completion — the reorder signal.
-final typeSummaryProvider = FutureProvider<List<CoreTypeSummaryRow>>((ref) async {
+final typeSummaryProvider = FutureProvider.autoDispose<List<CoreTypeSummaryRow>>((ref) async {
   final data = await ref.watch(coreApiProvider).get('/thaans/type-summary');
   return [
     for (final row in (data as List)) CoreTypeSummaryRow.fromJson((row as Map).cast<String, dynamic>()),
