@@ -957,6 +957,9 @@ class CoreThaan {
     required this.pipelineStatus,
     required this.qrGeneratedAt,
     required this.voidedAt,
+    required this.lastVendorId,
+    required this.lastVendorName,
+    required this.lastStage,
   });
 
   final String? code;
@@ -978,6 +981,12 @@ class CoreThaan {
   /// Set once someone voids this Thaan — never unset.
   final String? voidedAt;
 
+  /// Whoever most recently held this Thaan for a stage — null if it has no
+  /// handover history yet. What "Flag as damaged" pre-fills from.
+  final String? lastVendorId;
+  final String? lastVendorName;
+  final String? lastStage;
+
   factory CoreThaan.fromJson(Map<String, dynamic> json) => CoreThaan(
         code: json['code'] as String?,
         baleCode: json['baleCode'] as String,
@@ -989,6 +998,9 @@ class CoreThaan {
         pipelineStatus: json['pipelineStatus'] as String,
         qrGeneratedAt: json['qrGeneratedAt'] as String?,
         voidedAt: json['voidedAt'] as String?,
+        lastVendorId: json['lastVendorId'] as String?,
+        lastVendorName: json['lastVendorName'] as String?,
+        lastStage: json['lastStage'] as String?,
       );
 }
 

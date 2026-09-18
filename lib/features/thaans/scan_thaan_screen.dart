@@ -5,7 +5,9 @@ import '../../core/api_client.dart';
 import '../../models/core.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/async_view.dart';
+import '../../widgets/picker_field.dart';
 import '../../widgets/theme_button.dart';
+import '../handovers/handover_providers.dart' show coreVendorsProvider;
 import '../pos/barcode_scan_screen.dart';
 import 'thaan_providers.dart';
 
@@ -27,6 +29,7 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
   final _focus = FocusNode();
   bool _busy = false;
   CoreThaan? _result;
+  String? _resultCode;
   String? _notFoundCode;
 
   @override
@@ -42,11 +45,15 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
     setState(() {
       _busy = true;
       _result = null;
+      _resultCode = null;
       _notFoundCode = null;
     });
     try {
       final thaan = await ref.read(thaanRepositoryProvider).lookupByCode(code);
-      setState(() => _result = thaan);
+      setState(() {
+        _result = thaan;
+        _resultCode = code;
+      });
     } on ApiException catch (e) {
       if (e.status == 404) {
         setState(() => _notFoundCode = code);
@@ -67,6 +74,18 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
       MaterialPageRoute(builder: (_) => const BarcodeScanScreen(title: 'Scan a Thaan')),
     );
     if (code != null) await _lookup(code);
+  }
+
+  Future<void> _flagDamaged(CoreThaan thaan, String code) async {
+    final flagged = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _FlagDamagedSheet(code: code, thaan: thaan),
+    );
+    if (flagged == true && mounted) {
+      showOk(context, '$code marked damaged.');
+      await _lookup(code);
+    }
   }
 
   @override
@@ -125,7 +144,11 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
                 ),
               ),
             ),
-          if (_result != null && !_busy) _ThaanCard(thaan: _result!),
+          if (_result != null && !_busy)
+            _ThaanCard(
+              thaan: _result!,
+              onFlagDamaged: () => _flagDamaged(_result!, _resultCode!),
+            ),
         ],
       ),
     );
@@ -133,8 +156,9 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
 }
 
 class _ThaanCard extends StatelessWidget {
-  const _ThaanCard({required this.thaan});
+  const _ThaanCard({required this.thaan, required this.onFlagDamaged});
   final CoreThaan thaan;
+  final VoidCallback onFlagDamaged;
 
   @override
   Widget build(BuildContext context) {
@@ -168,6 +192,18 @@ class _ThaanCard extends StatelessWidget {
             _kv(context, 'Bale received', t.billEntryDate),
             if (t.perThaanMetres != null) _kv(context, 'Metres (this Thaan\'s share)', '${t.perThaanMetres}'),
             _kv(context, 'QR generated', t.qrGeneratedAt ?? 'Not yet'),
+            if (t.voidedAt == null) ...[
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: onFlagDamaged,
+                  style: OutlinedButton.styleFrom(foregroundColor: p.danger, side: BorderSide(color: p.danger)),
+                  icon: const Icon(Icons.report_gmailerrorred_outlined),
+                  label: const Text('Flag as damaged'),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -185,4 +221,134 @@ class _ThaanCard extends StatelessWidget {
           ],
         ),
       );
+}
+
+/// Flags [code] damaged. Pre-fills the vendor from [thaan]'s own
+/// `lastVendorId` (whoever most recently held it) — auto-derived, but
+/// changeable here, since the derived guess isn't always who's actually
+/// responsible.
+class _FlagDamagedSheet extends ConsumerStatefulWidget {
+  const _FlagDamagedSheet({required this.code, required this.thaan});
+  final String code;
+  final CoreThaan thaan;
+
+  @override
+  ConsumerState<_FlagDamagedSheet> createState() => _FlagDamagedSheetState();
+}
+
+class _FlagDamagedSheetState extends ConsumerState<_FlagDamagedSheet> {
+  String? _vendorId;
+  final _notes = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _vendorId = widget.thaan.lastVendorId;
+  }
+
+  @override
+  void dispose() {
+    _notes.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    setState(() => _busy = true);
+    try {
+      await ref.read(thaanRepositoryProvider).flagDamaged(
+            code: widget.code,
+            vendorId: _vendorId,
+            notes: _notes.text.trim(),
+          );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final vendors = ref.watch(coreVendorsProvider);
+    final t = widget.thaan;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 20, 16, MediaQuery.of(context).viewInsets.bottom + 16),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.report_gmailerrorred, color: p.danger),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Flag ${widget.code} damaged',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                t.lastStage != null
+                    ? 'Last at ${t.lastStage}${t.lastVendorName != null ? ' · ${t.lastVendorName}' : ''}.'
+                    : 'No stage recorded for this Thaan yet.',
+                style: TextStyle(color: p.textSecondary),
+              ),
+              const SizedBox(height: 16),
+              vendors.when(
+                loading: () => const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: LinearProgressIndicator(),
+                ),
+                error: (e, _) => Text('$e', style: TextStyle(color: p.danger)),
+                data: (rows) => PickerField(
+                  label: 'Vendor',
+                  value: _vendorId,
+                  hint: 'None (in-house or unknown)',
+                  allowClear: true,
+                  options: [for (final v in rows) PickerOption(v.id, v.name)],
+                  onChanged: (v) => setState(() => _vendorId = v),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _notes,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Notes',
+                  hintText: "What's wrong with it — optional",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _busy ? null : _submit,
+                  style: FilledButton.styleFrom(backgroundColor: p.danger),
+                  icon: _busy
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.report_gmailerrorred),
+                  label: Text(_busy ? 'Flagging…' : 'Flag as damaged'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

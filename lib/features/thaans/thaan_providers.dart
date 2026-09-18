@@ -15,4 +15,16 @@ class ThaanRepository {
     final data = await ref.read(coreApiProvider).get('/thaans/lookup', query: {'code': code});
     return CoreThaan.fromJson((data as Map).cast<String, dynamic>());
   }
+
+  /// Flags a Thaan damaged — [vendorId] overrides the auto-derived one
+  /// (`CoreThaan.lastVendorId`) when the scanner corrects it; pass it back
+  /// unchanged to keep the derived vendor. Returns the confirmation message.
+  Future<String> flagDamaged({required String code, String? vendorId, String notes = ''}) async {
+    final data = await ref.read(coreApiProvider).post('/thaans/flag-damaged', body: {
+      'code': code,
+      'vendorId': vendorId,
+      'notes': notes,
+    });
+    return (data as Map)['message'] as String;
+  }
 }
