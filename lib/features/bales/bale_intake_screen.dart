@@ -293,7 +293,6 @@ class _ItemField extends StatelessWidget {
       error: (e, _) => Text('$e', style: TextStyle(color: context.p.danger)),
       data: (rows) => PickerField(
         label: 'Item',
-        hint: 'Not on the list? Add it from slk-core first.',
         value: value,
         options: [
           for (final i in rows.where((i) => i.status == 'active' || i.id == value))
