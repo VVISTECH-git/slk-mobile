@@ -8,13 +8,13 @@ import 'bale_providers.dart';
 import 'thaan_labels_pdf.dart';
 
 /// Printing a bale's QR-coded Thaan labels — its own screen, not a button
-/// buried in Record Cutting's sheet. A thermal roll running out of ink
-/// partway through a real batch (500 Thaans is well within range here)
-/// needs a way to pick up where it stopped — by the Thaan code on the last
-/// label that actually printed, which is the only thing physically in
-/// front of whoever's reloading the printer. Not a position number: nobody
-/// standing at a printer knows "#50", they know "T00002120". Mirrors the
-/// same idea slk-core's own `/thaans/print/[baleId]` page uses.
+/// buried in Record Cutting's sheet. Ink or paper running out partway
+/// through a real batch (500 Thaans is well within range here) needs a way
+/// to pick up where it stopped — by the Thaan code on the last label that
+/// actually printed, which is the only thing physically in front of
+/// whoever's reloading the printer. Not a position number: nobody standing
+/// at a printer knows "#50", they know "T00002120". Mirrors the same idea
+/// slk-core's own `/thaans/print/[baleId]` page uses.
 class ThaanLabelsScreen extends ConsumerStatefulWidget {
   const ThaanLabelsScreen({super.key, required this.baleId});
   final String baleId;
