@@ -218,6 +218,7 @@ class _RecordThaansSheetState extends ConsumerState<_RecordThaansSheet> {
 
   bool _recording = false;
   bool _completing = false;
+  bool _generatingQr = false;
 
   @override
   void initState() {
@@ -262,6 +263,7 @@ class _RecordThaansSheetState extends ConsumerState<_RecordThaansSheet> {
           status: 'cutting_in_progress',
           billEntryDate: _bale.billEntryDate,
           thaanCount: _bale.thaanCount + int.parse(count),
+          qrGeneratedCount: _bale.qrGeneratedCount,
         );
         _count.clear();
       });
@@ -287,10 +289,59 @@ class _RecordThaansSheetState extends ConsumerState<_RecordThaansSheet> {
     }
   }
 
+  Future<void> _generateQr() async {
+    final remaining = _bale.thaanCount - _bale.qrGeneratedCount;
+    final already = _bale.qrGeneratedCount;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Generate QR codes for ${_bale.code}?'),
+        content: Text(
+          "Assigns a permanent code to the $remaining Thaan${remaining == 1 ? '' : 's'} still waiting on one"
+          '${already > 0 ? ' — the $already already coded ${already == 1 ? 'stays' : 'stay'} untouched' : ''}. '
+          "This can't be undone — a code, once generated, is fixed.",
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Generate')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _generatingQr = true);
+    try {
+      final message = await ref.read(baleRepositoryProvider).generateQrCodes(_bale.id);
+      if (!mounted) return;
+      showOk(context, message);
+      setState(() {
+        _bale = CoreBale(
+          id: _bale.id,
+          code: _bale.code,
+          supplierName: _bale.supplierName,
+          type: _bale.type,
+          metresReceived: _bale.metresReceived,
+          uom: _bale.uom,
+          itemName: _bale.itemName,
+          baleCount: _bale.baleCount,
+          status: _bale.status,
+          billEntryDate: _bale.billEntryDate,
+          thaanCount: _bale.thaanCount,
+          qrGeneratedCount: _bale.thaanCount,
+        );
+      });
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _generatingQr = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    final busy = _recording || _completing;
+    final busy = _recording || _completing || _generatingQr;
+    final qrRemaining = _bale.thaanCount - _bale.qrGeneratedCount;
 
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
@@ -345,6 +396,26 @@ class _RecordThaansSheetState extends ConsumerState<_RecordThaansSheet> {
                 style: TextStyle(fontSize: 12, color: p.textMuted),
               ),
             ),
+          const Divider(height: 28),
+          OutlinedButton.icon(
+            onPressed: busy || qrRemaining <= 0 ? null : _generateQr,
+            icon: _generatingQr
+                ? SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: p.accent))
+                : const Icon(Icons.qr_code_2),
+            label: Text(_generatingQr ? 'Generating…' : 'Generate QR codes'),
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              _bale.thaanCount == 0
+                  ? "This bale hasn't been cut yet."
+                  : qrRemaining <= 0
+                      ? 'Every Thaan from this bale already has a code.'
+                      : '$qrRemaining Thaan${qrRemaining == 1 ? '' : 's'} still waiting on a code.',
+              style: TextStyle(fontSize: 12, color: p.textMuted),
+            ),
+          ),
         ],
       ),
     );

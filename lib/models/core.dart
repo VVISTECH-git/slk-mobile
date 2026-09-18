@@ -898,6 +898,7 @@ class CoreBale {
     required this.status,
     required this.billEntryDate,
     this.thaanCount = 0,
+    this.qrGeneratedCount = 0,
   });
 
   final String id;
@@ -920,6 +921,11 @@ class CoreBale {
   /// as cutting takes.
   final int thaanCount;
 
+  /// How many of those Thaans already have a permanent QR code. Never
+  /// exceeds [thaanCount]; once it equals it, there is nothing left for
+  /// "Generate QR codes" to do.
+  final int qrGeneratedCount;
+
   factory CoreBale.fromJson(Map<String, dynamic> json) => CoreBale(
         id: json['id'] as String,
         code: json['code'] as String,
@@ -932,6 +938,7 @@ class CoreBale {
         status: json['status'] as String,
         billEntryDate: json['billEntryDate'] as String,
         thaanCount: (json['thaanCount'] as num?)?.toInt() ?? 0,
+        qrGeneratedCount: (json['qrGeneratedCount'] as num?)?.toInt() ?? 0,
       );
 }
 

@@ -107,4 +107,12 @@ class BaleRepository {
     final data = await ref.read(coreApiProvider).post('/bales/$baleId/complete');
     return (data as Map)['message'] as String;
   }
+
+  /// Assigns permanent QR codes to every Thaan from this bale that doesn't
+  /// have one yet. Irreversible per Thaan — see the web's own confirm
+  /// dialog wording, which this mirrors.
+  Future<String> generateQrCodes(String baleId) async {
+    final data = await ref.read(coreApiProvider).post('/bales/$baleId/generate-qr');
+    return (data as Map)['message'] as String;
+  }
 }
