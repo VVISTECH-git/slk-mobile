@@ -35,18 +35,46 @@ class PlaceholderScreen extends StatelessWidget {
   }
 }
 
+/// Shown while the app checks whether a token is already stored, before it
+/// knows to route to sign-in or straight to Home. The OS's own native splash
+/// (flutter_native_splash — terracotta + splash_logo.png) already covers the
+/// cold-start instant before Flutter's first frame; this one picks up
+/// exactly where that leaves off — same colour, same mark — instead of
+/// cutting to a bare spinner on a different background the moment Flutter
+/// takes over. Deliberately not `context.p.surface1`: this runs before
+/// there's any reason to show the signed-in-in account's chosen theme, and a
+/// splash that changed colour per theme would just trade one jarring cut for
+/// another.
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
+
+  static const _brand = Color(0xFFB5533B);
+
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final overlay = (isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
-        .copyWith(statusBarColor: Colors.transparent);
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: overlay,
+    return const AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle(statusBarColor: Colors.transparent, statusBarIconBrightness: Brightness.light),
       child: Scaffold(
-        backgroundColor: context.p.surface1,
-        body: const Center(child: CircularProgressIndicator()),
+        backgroundColor: _brand,
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image(image: AssetImage('assets/icon/splash_logo.png'), width: 104, height: 104),
+              SizedBox(height: 22),
+              Text(
+                'SLK Stock',
+                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700, letterSpacing: 0.4),
+              ),
+              SizedBox(height: 32),
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white70),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
