@@ -115,4 +115,14 @@ class BaleRepository {
     final data = await ref.read(coreApiProvider).post('/bales/$baleId/generate-qr');
     return (data as Map)['message'] as String;
   }
+
+  /// The bale's own code plus every Thaan code it has assigned so far —
+  /// what "Print QR codes" hands to [printThaanLabels].
+  Future<(String baleCode, List<String> codes)> qrCodes(String baleId) async {
+    final data = (await ref.read(coreApiProvider).get('/bales/$baleId/thaans')) as Map;
+    return (
+      data['baleCode'] as String,
+      [for (final c in (data['codes'] as List)) c as String],
+    );
+  }
 }
