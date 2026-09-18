@@ -1230,6 +1230,27 @@ class CoreStageGroup {
       );
 }
 
+/// One bale type's own completion — "Sarees", "Fabric", "Chunnies",
+/// "Bedsheets" or "Pillows" — how many of its Thaans are Finished against
+/// how many exist at all. Same rows slk-core's own `TypeSummaryRow`
+/// carries (apps/web/src/lib/thaans.ts). A type near 100% finished with
+/// nothing left behind it is a type about to run out of stock to cut.
+class CoreTypeSummaryRow {
+  const CoreTypeSummaryRow({required this.type, required this.total, required this.finished});
+
+  final String type;
+  final int total;
+  final int finished;
+
+  double get finishedFraction => total == 0 ? 0 : finished / total;
+
+  factory CoreTypeSummaryRow.fromJson(Map<String, dynamic> json) => CoreTypeSummaryRow(
+        type: json['type'] as String,
+        total: json['total'] as int,
+        finished: json['finished'] as int,
+      );
+}
+
 /// One Thaan, as a Send-screen scan answers for it — the same shape
 /// `ThaanForSend` on the web carries.
 class CoreThaanForSend {

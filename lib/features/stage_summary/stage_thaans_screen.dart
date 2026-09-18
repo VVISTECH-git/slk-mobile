@@ -14,8 +14,9 @@ import 'stage_summary_providers.dart';
 /// Pushed, not routed: a drill-down from one number, the same way
 /// BarcodeScanScreen is pushed rather than given its own go_router path.
 class StageThaansScreen extends ConsumerStatefulWidget {
-  const StageThaansScreen({super.key, required this.bucket});
+  const StageThaansScreen({super.key, required this.bucket, this.baleType});
   final String bucket;
+  final String? baleType;
 
   @override
   ConsumerState<StageThaansScreen> createState() => _StageThaansScreenState();
@@ -32,15 +33,16 @@ class _StageThaansScreenState extends ConsumerState<StageThaansScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final groups = ref.watch(stageGroupsProvider(widget.bucket));
+    final key = (bucket: widget.bucket, baleType: widget.baleType);
+    final groups = ref.watch(stageGroupsProvider(key));
     final p = context.p;
     final q = _query.text.trim().toLowerCase();
 
     return Scaffold(
-      appBar: AppBar(title: Text(widget.bucket)),
+      appBar: AppBar(title: Text(widget.baleType != null ? '${widget.bucket} · ${widget.baleType}' : widget.bucket)),
       body: AsyncView(
         value: groups,
-        onRetry: () => ref.invalidate(stageGroupsProvider(widget.bucket)),
+        onRetry: () => ref.invalidate(stageGroupsProvider(key)),
         isEmpty: (rows) => rows.isEmpty,
         emptyMessage: 'Nothing here right now.',
         data: (rows) {
