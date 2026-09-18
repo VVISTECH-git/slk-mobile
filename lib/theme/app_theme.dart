@@ -153,7 +153,19 @@ class SlkThemes {
     ),
   );
 
-  static const List<SlkTheme> all = [kalamkari, dark, midnight, forest, slate];
+  static const terminal = SlkTheme(
+    id: 'terminal', label: 'Terminal', description: 'Hazard yellow · Warehouse',
+    brightness: Brightness.dark,
+    palette: AppPalette(
+      primary: Color(0xFFF4C000), primaryDark: Color(0xFFC99A00), accent: Color(0xFFF4C000),
+      surface1: Color(0xFF101214), surface2: Color(0xFF17191B), surface3: Color(0xFF202224),
+      text: Color(0xFFF2F1EA), textSecondary: Color(0xFFA9AD9F), textMuted: Color(0xFF6E7166),
+      border: Color(0xFF2B2E2F), success: Color(0xFF3FAE5C), danger: Color(0xFFEF5350),
+      appBar: Color(0xFF0A0B0C), onAppBar: Color(0xFFF2F1EA), onPrimary: Color(0xFF0A0B0C),
+    ),
+  );
+
+  static const List<SlkTheme> all = [kalamkari, dark, midnight, forest, slate, terminal];
   static const fallback = kalamkari;
   static SlkTheme byId(String id) => all.firstWhere((t) => t.id == id, orElse: () => fallback);
 }
