@@ -8,7 +8,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/theme_button.dart';
 import 'bale_providers.dart';
-import 'thaan_labels_pdf.dart';
+import 'thaan_labels_screen.dart';
 
 /// Kora to Shelf: recording Thaans cut from a bale already on file.
 ///
@@ -220,7 +220,6 @@ class _RecordThaansSheetState extends ConsumerState<_RecordThaansSheet> {
   bool _recording = false;
   bool _completing = false;
   bool _generatingQr = false;
-  bool _printing = false;
 
   @override
   void initState() {
@@ -339,26 +338,10 @@ class _RecordThaansSheetState extends ConsumerState<_RecordThaansSheet> {
     }
   }
 
-  /// Fetches this bale's coded Thaans and hands them to the OS print dialog
-  /// — whatever printer is set up on the phone (or reachable from it) picks
-  /// up from there. See `thaan_labels_pdf.dart` for the label layout.
-  Future<void> _printQr() async {
-    setState(() => _printing = true);
-    try {
-      final (baleCode, codes) = await ref.read(baleRepositoryProvider).qrCodes(_bale.id);
-      if (!mounted) return;
-      await printThaanLabels(baleCode: baleCode, codes: codes);
-    } catch (e) {
-      if (mounted) showError(context, e);
-    } finally {
-      if (mounted) setState(() => _printing = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    final busy = _recording || _completing || _generatingQr || _printing;
+    final busy = _recording || _completing || _generatingQr;
     final qrRemaining = _bale.thaanCount - _bale.qrGeneratedCount;
 
     return Padding(
@@ -436,11 +419,13 @@ class _RecordThaansSheetState extends ConsumerState<_RecordThaansSheet> {
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed: busy || _bale.qrGeneratedCount == 0 ? null : _printQr,
-            icon: _printing
-                ? SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: p.accent))
-                : const Icon(Icons.print_outlined),
-            label: Text(_printing ? 'Preparing…' : 'Print QR codes'),
+            onPressed: busy || _bale.qrGeneratedCount == 0
+                ? null
+                : () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => ThaanLabelsScreen(baleId: _bale.id)),
+                    ),
+            icon: const Icon(Icons.print_outlined),
+            label: const Text('Print QR codes'),
             style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
           ),
           if (_bale.qrGeneratedCount == 0)
