@@ -58,30 +58,60 @@ class CoreActor {
     required this.code,
     required this.name,
     required this.role,
+    this.jobRoles = const [],
   });
 
   final String id;
   final String code;
   final String name;
 
-  /// floor · office · owner. The API enforces it; this is for showing.
-  ///
-  /// No client-side gate on creating or editing a record: every signed-in
-  /// actor may, floor included, because whoever is holding the delivery is
-  /// who enters it and who is best placed to correct their own typo. The API
-  /// is still the one deciding — a 403 is what to check, not a rule copied
-  /// here.
+  /// floor · office · owner — a historical label now. slk-core retired Role
+  /// as a source of access (see its own auth.ts, ADMIN_OVERRIDE_JOB_ROLE);
+  /// [jobRoles] below is what the API actually checks, and what this app
+  /// checks too, via [hasAnyJobRole].
   final String role;
+
+  /// What this actor is actually allowed to do — "Admin", "Bale Custodian",
+  /// "Handler", and so on. Empty means a sign-in that can reach nothing at
+  /// all; the Staff screen refuses to create one like that, but an older
+  /// account or one edited by hand could still arrive this way.
+  final List<String> jobRoles;
+
+  /// The one job role that means "everywhere" — matches
+  /// ADMIN_OVERRIDE_JOB_ROLE in slk-core's own auth.ts exactly. Duplicated
+  /// rather than fetched, the same reasoning slk-core's own sidebar gives for
+  /// duplicating it client-side: this is a plain string, not worth a round
+  /// trip to agree on.
+  static const _adminJobRole = 'Admin';
+
+  /// Whether holding any of [needed] would let this actor through a
+  /// job-role gate — true unconditionally for Admin, same as the API's own
+  /// `hasAnyJobRole` in auth.ts. This is the one check every screen that
+  /// hides itself by job role should call, so a mismatch between what is
+  /// shown and what the API actually allows can only ever happen in one
+  /// place if it happens at all.
+  bool hasAnyJobRole(List<String> needed) =>
+      jobRoles.contains(_adminJobRole) ||
+      needed.any((role) => jobRoles.contains(role));
 
   factory CoreActor.fromJson(Map<String, dynamic> json) => CoreActor(
         id: json['id'] as String,
         code: json['code'] as String,
         name: json['name'] as String,
         role: json['role'] as String,
+        jobRoles: switch (json['jobRoles']) {
+          List<dynamic> raw => raw.map((r) => r as String).toList(),
+          _ => const [],
+        },
       );
 
-  Map<String, dynamic> toJson() =>
-      {'id': id, 'code': code, 'name': name, 'role': role};
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'code': code,
+        'name': name,
+        'role': role,
+        'jobRoles': jobRoles,
+      };
 
   String encode() => jsonEncode(toJson());
 

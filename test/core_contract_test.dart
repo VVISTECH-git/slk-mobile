@@ -14,12 +14,14 @@ import 'package:slk_mobile/models/core.dart';
 /// never the fixture to match the model.
 void main() {
   group('CoreActor', () {
-    // GET /api/v1/auth/me
+    // GET /api/v1/auth/me — jobRoles added when slk-core retired Role as a
+    // source of access; this is what the field actually looks like now.
     const me = {
       'id': '96b1aa3e-0f34-4758-a79a-39b7200eb678',
       'code': 'apitest',
       'name': 'API Test',
       'role': 'owner',
+      'jobRoles': ['Bale Custodian'],
     };
 
     test('parses the sign-in response', () {
@@ -29,13 +31,28 @@ void main() {
       expect(actor.code, 'apitest');
       expect(actor.name, 'API Test');
       expect(actor.role, 'owner');
+      expect(actor.jobRoles, ['Bale Custodian']);
     });
 
     test('survives being cached and read back', () {
       final restored = CoreActor.decode(CoreActor.fromJson(me).encode());
       expect(restored.id, me['id']);
       expect(restored.role, me['role']);
+      expect(restored.jobRoles, me['jobRoles']);
     });
+
+    test(
+      'REGRESSION: a cached actor from before jobRoles existed still decodes',
+      () {
+        // A session cached before this field shipped has no jobRoles key at
+        // all — not an empty list, an absent one. That must read as "no job
+        // roles", the honest state, and not throw.
+        final stale = Map<String, dynamic>.from(me)..remove('jobRoles');
+        final actor = CoreActor.fromJson(stale);
+
+        expect(actor.jobRoles, isEmpty);
+      },
+    );
 
     test('keeps whatever role the server sent, without interpreting it', () {
       // Deliberately no `canCreateRecords` here. Creating is open to every
@@ -48,6 +65,47 @@ void main() {
           role,
         );
       }
+    });
+
+    group('hasAnyJobRole', () {
+      test('true when the actor holds one of the needed job roles', () {
+        final actor = CoreActor(
+          id: 'x',
+          code: 'c',
+          name: 'n',
+          role: 'floor',
+          jobRoles: const ['Handler'],
+        );
+        expect(actor.hasAnyJobRole(['Bale Custodian', 'Handler']), isTrue);
+      });
+
+      test('false when the actor holds none of the needed job roles', () {
+        final actor = CoreActor(
+          id: 'x',
+          code: 'c',
+          name: 'n',
+          role: 'floor',
+          jobRoles: const ['Handler'],
+        );
+        expect(actor.hasAnyJobRole(['Bale Custodian']), isFalse);
+      });
+
+      test('Admin always passes, whatever is asked for', () {
+        final actor = CoreActor(
+          id: 'x',
+          code: 'c',
+          name: 'n',
+          role: 'floor',
+          jobRoles: const ['Admin'],
+        );
+        expect(actor.hasAnyJobRole(['Bale Custodian']), isTrue);
+        expect(actor.hasAnyJobRole([]), isTrue);
+      });
+
+      test('no job roles at all never passes anything', () {
+        const actor = CoreActor(id: 'x', code: 'c', name: 'n', role: 'floor');
+        expect(actor.hasAnyJobRole(['Bale Custodian']), isFalse);
+      });
     });
   });
 

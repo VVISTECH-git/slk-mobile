@@ -24,6 +24,18 @@ class CoreHomeScreen extends ConsumerWidget {
     final p = context.p;
     final actor = ref.watch(coreAuthProvider).actor;
 
+    // Job role decides what shows, same as the web sidebar (see slk-core's
+    // sidebar.tsx) — not Role, which grants nothing anymore. Filtered here
+    // rather than left to the API's own 403: a tile that opens onto a wall
+    // is worse than no tile, and this screen already has the file's own
+    // "shown anyway, said plainly" rule for something that doesn't exist yet
+    // — the same courtesy applies to something that exists but isn't this
+    // actor's to open.
+    final visible = [
+      for (final module in _modules)
+        if (actor != null && actor.hasAnyJobRole(module.jobRoles)) module,
+    ];
+
     return Scaffold(
       backgroundColor: p.surface1,
       appBar: AppBar(
@@ -42,13 +54,16 @@ class CoreHomeScreen extends ConsumerWidget {
           if (actor != null) _Signed(actor: actor),
           const SizedBox(height: 18),
 
-          for (final module in _modules)
-            _Tile(
-              module: module,
-              onTap: module.route == null
-                  ? null
-                  : () => context.push(module.route!),
-            ),
+          if (visible.isEmpty)
+            const _NoJobRoles()
+          else
+            for (final module in visible)
+              _Tile(
+                module: module,
+                onTap: module.route == null
+                    ? null
+                    : () => context.push(module.route!),
+              ),
         ],
       ),
     );
@@ -56,7 +71,7 @@ class CoreHomeScreen extends ConsumerWidget {
 }
 
 class _Module {
-  const _Module(this.label, this.detail, this.icon, this.route);
+  const _Module(this.label, this.detail, this.icon, this.route, this.jobRoles);
 
   final String label;
   final String detail;
@@ -69,6 +84,35 @@ class _Module {
   /// no tile, and one quietly missing is how somebody concludes the app cannot
   /// do a thing it will.
   final String? route;
+
+  /// Which job role(s) unlock this — matches the gate slk-core's own API
+  /// actually enforces for the route behind it (see each module's own
+  /// comment below for exactly which one). Never empty: everything requires
+  /// something now that Role grants nothing on its own.
+  final List<String> jobRoles;
+}
+
+class _NoJobRoles extends StatelessWidget {
+  const _NoJobRoles();
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: p.surface2,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: p.border),
+      ),
+      child: Text(
+        "Signed in, but nothing is assigned yet. Ask whoever manages Staff "
+        'to give this account a job role.',
+        style: TextStyle(fontSize: 13, color: p.textSecondary, height: 1.4),
+      ),
+    );
+  }
 }
 
 /*
@@ -82,54 +126,66 @@ class _Module {
   Photographs is the exception — the portal has no such screen, because
   uploading there happens inside the record editor.
 */
+// Every gate below matches an actual API check in slk-core, not a guess —
+// see that repo's api/v1 route files for each one, all still `guarded`
+// (Admin-only) except the three the bale/vendor pipeline carved job roles
+// out for.
 const _modules = [
   _Module(
     'Product Management',
     'File something that has arrived',
     Icons.add_box_outlined,
     '/core/records/new',
+    ['Admin'],
   ),
   _Module(
     'Products List',
     'Find one, and photograph it',
     Icons.inventory_2_outlined,
     '/core/records',
+    ['Admin'],
   ),
   _Module(
     'Stock Records',
     'Scan a piece, count what is here',
     Icons.qr_code_scanner,
     '/core/stock',
+    ['Admin'],
   ),
   _Module(
     'Photographs',
     'Everything still waiting to be shot',
     Icons.photo_camera_outlined,
     '/core/photographs',
+    ['Admin'],
   ),
   _Module(
     'Picking',
     'Pack an order that is waiting',
     Icons.local_shipping_outlined,
     '/core/picking',
+    ['Admin'],
   ),
   _Module(
     'Bale Intake',
     'Log a bale of raw cloth as it arrives',
     Icons.inventory_outlined,
     '/core/bales/new',
+    ['Bale Custodian'],
   ),
   _Module(
     'Record Cutting',
     'Find a bale, log what was just cut',
     Icons.content_cut,
     '/core/bales/cut',
+    ['Bale Custodian'],
   ),
   _Module(
     'Handovers',
     'Scan a Thaan out, scan it back',
     Icons.sync_alt,
     '/core/handovers',
+    ['Bale Custodian', 'Handler'],
   ),
 ];
 
@@ -243,8 +299,12 @@ class _Signed extends StatelessWidget {
           Expanded(
             child: Text(
               // Named, because a floor phone is shared and every movement this
-              // person records is recorded against them.
-              'Signed in as ${actor.name} · ${actor.role}',
+              // person records is recorded against them. Job roles, not
+              // Role, since that's what actually says what they can do here
+              // — see CoreActor.hasAnyJobRole.
+              actor.jobRoles.isEmpty
+                  ? 'Signed in as ${actor.name}'
+                  : 'Signed in as ${actor.name} · ${actor.jobRoles.join(", ")}',
               style: TextStyle(fontSize: 13, color: p.textSecondary),
             ),
           ),
