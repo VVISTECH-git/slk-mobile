@@ -942,6 +942,56 @@ class CoreBale {
       );
 }
 
+/// One Thaan's own details, as `/api/v1/thaans/lookup?code=` returns
+/// them — what scanning a printed label resolves to. Same fields slk-core's
+/// own Thaans table shows per row.
+class CoreThaan {
+  const CoreThaan({
+    required this.code,
+    required this.baleCode,
+    required this.supplierName,
+    required this.itemName,
+    required this.baleType,
+    required this.billEntryDate,
+    required this.perThaanMetres,
+    required this.pipelineStatus,
+    required this.qrGeneratedAt,
+    required this.voidedAt,
+  });
+
+  final String? code;
+  final String baleCode;
+  final String supplierName;
+  final String itemName;
+  final String baleType;
+  final String billEntryDate;
+  final double? perThaanMetres;
+
+  /// "Out for Salava", "Ready for Karakkaya", "Finished" — see slk-core's
+  /// own `pipelineStatus()` in `lib/thaans.ts` for exactly how this reads.
+  final String pipelineStatus;
+
+  /// "14 Sep 2026, 05:35 AM" — already formatted server-side. Null until a
+  /// code has been generated for this Thaan.
+  final String? qrGeneratedAt;
+
+  /// Set once someone voids this Thaan — never unset.
+  final String? voidedAt;
+
+  factory CoreThaan.fromJson(Map<String, dynamic> json) => CoreThaan(
+        code: json['code'] as String?,
+        baleCode: json['baleCode'] as String,
+        supplierName: json['supplierName'] as String,
+        itemName: json['itemName'] as String,
+        baleType: json['baleType'] as String,
+        billEntryDate: json['billEntryDate'] as String,
+        perThaanMetres: (json['perThaanMetres'] as num?)?.toDouble(),
+        pipelineStatus: json['pipelineStatus'] as String,
+        qrGeneratedAt: json['qrGeneratedAt'] as String?,
+        voidedAt: json['voidedAt'] as String?,
+      );
+}
+
 /// Who a batch can be sent to — Handovers' Send screen's vendor picker.
 /// Deliberately thin: id, name and which stages they do, not the billing
 /// totals `/vendors` on the web carries — a floor phone sending a batch has

@@ -16,6 +16,7 @@ import 'features/category/category_form_screen.dart';
 import 'features/bales/bale_intake_screen.dart';
 import 'features/bales/record_cutting_screen.dart';
 import 'features/handovers/handovers_screen.dart';
+import 'features/thaans/thaan_qr_hub_screen.dart';
 import 'features/core/core_auth.dart';
 import 'features/core/core_home_screen.dart';
 import 'features/core/core_sign_in_screen.dart';
@@ -189,6 +190,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       // back. See handovers_screen.dart for why this lives on the phone
       // and not only the web.
       GoRoute(path: '/core/handovers', builder: (_, _) => const HandoversScreen()),
+
+      // Print a bale's QR labels, or scan one to see what it is — see
+      // thaan_qr_hub_screen.dart.
+      GoRoute(path: '/core/thaans/qr', builder: (_, _) => const ThaanQrHubScreen()),
 
       // POS + invoices — live.
       GoRoute(path: '/pos', builder: (_, _) => const PosScreen()),

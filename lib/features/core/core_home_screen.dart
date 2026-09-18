@@ -187,6 +187,13 @@ const _modules = [
     '/core/handovers',
     ['Bale Custodian', 'Handler'],
   ),
+  _Module(
+    'Thaan QR Codes',
+    'Print labels, or scan one to see what it is',
+    Icons.qr_code_2,
+    '/core/thaans/qr',
+    ['Bale Custodian', 'Handler'],
+  ),
 ];
 
 class _Tile extends StatelessWidget {
