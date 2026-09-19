@@ -190,6 +190,7 @@ class _ThaanCard extends StatelessWidget {
             _kv(context, 'Supplier', t.supplierName),
             _kv(context, 'Item', '${t.itemName} · ${t.baleType}'),
             if (t.gradeCode != null) _kv(context, 'Grade', t.gradeCode!),
+            ..._clothRows(context),
             _kv(context, 'Bale status', _baleStatusLabel(t.baleStatus)),
             _kv(context, 'Bale received', t.billEntryDate),
             if (t.transporter != null) _kv(context, 'Transporter', t.transporter!),
@@ -217,6 +218,38 @@ class _ThaanCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// The cloth item's properties — only the ones it actually fixed.
+  List<Widget> _clothRows(BuildContext context) {
+    final t = thaan;
+    final rows = <(String, String?)>[
+      ('Fibre', t.fibre),
+      ('Textile material', t.textileMaterial),
+      ('Weave', t.weave),
+      ('Production', t.productionMethod),
+      ('Audience', t.audience),
+      ('Border', [t.borderStyle, t.borderHeight].whereType<String>().join(', ')),
+      ('Pallu', t.pallu),
+      (
+        'Blouse',
+        t.hasBlouse == null
+            ? null
+            : t.hasBlouse!
+                ? ([t.blouseStyle, t.blouseMaterial].whereType<String>().join(', ').isEmpty
+                    ? 'Yes'
+                    : [t.blouseStyle, t.blouseMaterial].whereType<String>().join(', '))
+                : 'No'
+      ),
+      ('Saree length', t.sareeLengthCm == null ? null : '${_num(t.sareeLengthCm!)} cm'),
+      ('Saree width', t.sareeWidthCm == null ? null : '${_num(t.sareeWidthCm!)} cm'),
+      ('Pallu length', t.palluLengthCm == null ? null : '${_num(t.palluLengthCm!)} cm'),
+      ('Blouse length', t.blouseLengthCm == null ? null : '${_num(t.blouseLengthCm!)} cm'),
+    ];
+    return [
+      for (final (k, v) in rows)
+        if (v != null && v.isNotEmpty) _kv(context, k, v),
+    ];
   }
 
   static String _num(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();

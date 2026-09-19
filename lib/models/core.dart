@@ -965,6 +965,21 @@ class CoreThaan {
     required this.baleCount,
     required this.baleNotes,
     required this.baleStatus,
+    this.fibre,
+    this.textileMaterial,
+    this.weave,
+    this.productionMethod,
+    this.audience,
+    this.borderStyle,
+    this.borderHeight,
+    this.pallu,
+    this.hasBlouse,
+    this.blouseStyle,
+    this.blouseMaterial,
+    this.sareeLengthCm,
+    this.sareeWidthCm,
+    this.palluLengthCm,
+    this.blouseLengthCm,
     required this.pipelineStatus,
     required this.qrGeneratedAt,
     required this.voidedAt,
@@ -998,6 +1013,24 @@ class CoreThaan {
 
   /// `awaiting_cutting`, `cutting_in_progress`, `cut` or `returned`.
   final String baleStatus;
+
+  /// The cloth item's own properties (Product Management's lists), read live
+  /// by slk-core — null means the item never fixed that fact.
+  final String? fibre;
+  final String? textileMaterial;
+  final String? weave;
+  final String? productionMethod;
+  final String? audience;
+  final String? borderStyle;
+  final String? borderHeight;
+  final String? pallu;
+  final bool? hasBlouse;
+  final String? blouseStyle;
+  final String? blouseMaterial;
+  final double? sareeLengthCm;
+  final double? sareeWidthCm;
+  final double? palluLengthCm;
+  final double? blouseLengthCm;
 
   /// "Out for Salava", "Ready for Karakkaya", "Finished" — see slk-core's
   /// own `pipelineStatus()` in `lib/thaans.ts` for exactly how this reads.
@@ -1035,6 +1068,21 @@ class CoreThaan {
         baleCount: json['baleCount'] as int,
         baleNotes: json['baleNotes'] as String?,
         baleStatus: json['baleStatus'] as String,
+        fibre: json['fibre'] as String?,
+        textileMaterial: json['textileMaterial'] as String?,
+        weave: json['weave'] as String?,
+        productionMethod: json['productionMethod'] as String?,
+        audience: json['audience'] as String?,
+        borderStyle: json['borderStyle'] as String?,
+        borderHeight: json['borderHeight'] as String?,
+        pallu: json['pallu'] as String?,
+        hasBlouse: json['hasBlouse'] as bool?,
+        blouseStyle: json['blouseStyle'] as String?,
+        blouseMaterial: json['blouseMaterial'] as String?,
+        sareeLengthCm: (json['sareeLengthCm'] as num?)?.toDouble(),
+        sareeWidthCm: (json['sareeWidthCm'] as num?)?.toDouble(),
+        palluLengthCm: (json['palluLengthCm'] as num?)?.toDouble(),
+        blouseLengthCm: (json['blouseLengthCm'] as num?)?.toDouble(),
         pipelineStatus: json['pipelineStatus'] as String,
         qrGeneratedAt: json['qrGeneratedAt'] as String?,
         voidedAt: json['voidedAt'] as String?,
