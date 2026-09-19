@@ -1327,6 +1327,7 @@ class CoreThaanForReceive {
     required this.baleType,
     required this.itemName,
     required this.stage,
+    this.throughStage,
     this.vendorId,
     required this.vendorName,
   });
@@ -1337,6 +1338,10 @@ class CoreThaanForReceive {
   final String baleType;
   final String itemName;
   final String stage;
+
+  /// The last stage of a combined trip, or null for an ordinary one-stage
+  /// trip. Receiving closes every stage up to it in one go.
+  final String? throughStage;
 
   /// Null means in-house — see [vendorName], which reads "In-house" then.
   final String? vendorId;
@@ -1349,6 +1354,7 @@ class CoreThaanForReceive {
         baleType: json['baleType'] as String,
         itemName: json['itemName'] as String,
         stage: json['stage'] as String,
+        throughStage: json['throughStage'] as String?,
         vendorId: json['vendorId'] as String?,
         vendorName: json['vendorName'] as String,
       );

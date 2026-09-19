@@ -39,6 +39,30 @@ const kSendableStages = <String>[
   'Ironing',
 ];
 
+/// "Salava" -> "Salava + Karakkaya": the name of a combined trip, one vendor
+/// doing several stages in a single visit. [through] null or empty (or not
+/// after [stage]) is the ordinary one-stage trip.
+String tripLabel(String stage, String? through) {
+  if (through == null || through.isEmpty) return stage;
+  final from = kStages.indexOf(stage);
+  final to = kStages.indexOf(through);
+  if (from < 0 || to <= from) return stage;
+  return kStages.sublist(from, to + 1).join(' + ');
+}
+
+/// The stages after [stage] that [vendorStages] also covers, in unbroken
+/// order: what one visit could cover. Stops at the first one the vendor
+/// doesn't do, since the cloth can't skip a stage on its way through.
+List<String> alsoStages(List<String>? vendorStages, String? stage) {
+  if (vendorStages == null || stage == null) return const [];
+  final out = <String>[];
+  for (var i = kStages.indexOf(stage) + 1; i > 0 && i < kStages.length; i++) {
+    if (!vendorStages.contains(kStages[i])) break;
+    out.add(kStages[i]);
+  }
+  return out;
+}
+
 /// Every vendor who could be sent a batch — the Send screen's picker.
 final coreVendorsProvider = FutureProvider.autoDispose<List<CoreVendor>>((ref) async {
   final data = await ref.watch(coreApiProvider).get('/vendors');
@@ -78,11 +102,13 @@ class HandoverRepository {
     required String stage,
     String? vendorId,
     required List<String> thaanIds,
+    String? throughStage,
   }) async {
     final data = await ref.read(coreApiProvider).post('/handovers/send', body: {
       'stage': stage,
       'vendorId': vendorId,
       'thaanIds': thaanIds,
+      if (throughStage != null) 'throughStage': throughStage,
     });
     return (data as Map)['message'] as String;
   }

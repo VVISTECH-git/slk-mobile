@@ -139,6 +139,9 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
   // Null means not chosen yet — see _vendorInHouse for why this can't
   // default to "in-house".
   String? _vendorId;
+  // Null is the ordinary one-stage trip; otherwise the last stage of a
+  // combined one (this vendor doing several stages in a single visit).
+  String? _through;
   final _items = <CoreThaanForSend>[];
   bool _busy = false;
 
@@ -153,6 +156,15 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
     if (vendors == null) return;
     final stillEligible = vendors.any((v) => v.id == _vendorId && v.stages.contains(_stage));
     if (!stillEligible) _vendorId = null;
+  }
+
+  /// The stages this vendor could also cover after [_stage], or none: for
+  /// in-house, an unchosen vendor, or a vendor who only does this one.
+  List<String> _alsoOptions() {
+    if (_vendorId == null || _vendorId == _vendorInHouse) return const [];
+    final vendors = ref.read(coreVendorsProvider).value;
+    final match = vendors?.where((v) => v.id == _vendorId);
+    return alsoStages(match == null || match.isEmpty ? null : match.first.stages, _stage);
   }
 
   Future<void> _scan() async {
@@ -240,7 +252,7 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Send ${_items.length} Thaan${_items.length == 1 ? '' : 's'} for $stage?'),
+        title: Text('Send ${_items.length} Thaan${_items.length == 1 ? '' : 's'} for ${tripLabel(stage, _through)}?'),
         content: Text(
           _vendorId == _vendorInHouse
               ? 'Going to in-house.'
@@ -260,10 +272,14 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
             stage: stage,
             vendorId: _vendorId == _vendorInHouse ? null : _vendorId,
             thaanIds: [for (final t in _items) t.id],
+            throughStage: _through,
           );
       if (!mounted) return;
       showOk(context, message);
-      setState(() => _items.clear());
+      setState(() {
+        _items.clear();
+        _through = null;
+      });
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -274,6 +290,9 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
   @override
   Widget build(BuildContext context) {
     final vendors = ref.watch(coreVendorsProvider);
+    final also = _alsoOptions();
+    // A choice made for another vendor or stage doesn't carry over.
+    if (_through != null && !also.contains(_through)) _through = null;
 
     return Column(
       children: [
@@ -323,6 +342,19 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
             ],
           ),
         ),
+        if (also.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: PickerField(
+              label: 'Stages this trip',
+              value: _through ?? _inHouse,
+              options: [
+                PickerOption(_inHouse, '${_stage!} only'),
+                for (final s in also) PickerOption(s, tripLabel(_stage!, s)),
+              ],
+              onChanged: (v) => setState(() => _through = (v == null || v == _inHouse) ? null : v),
+            ),
+          ),
         if (_items.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -471,7 +503,7 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     // this. A mixed batch (allowed — see the panel's own copy above) falls
     // back to just the count, since no single stage name would be true of
     // all of them.
-    final stages = _items.map((t) => t.stage).toSet();
+    final stages = _items.map((t) => tripLabel(t.stage, t.throughStage)).toSet();
     final title = stages.length == 1
         ? 'Receiving ${_items.length} Thaan${_items.length == 1 ? '' : 's'} after ${stages.first}?'
         : 'Receive ${_items.length} Thaan${_items.length == 1 ? '' : 's'}?';
@@ -527,7 +559,7 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
                     return ListTile(
                       dense: true,
                       title: Text(t.code, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w700)),
-                      subtitle: Text('${t.baleCode} · ${t.vendorName} — ${t.stage}'),
+                      subtitle: Text('${t.baleCode} · ${t.vendorName} — ${tripLabel(t.stage, t.throughStage)}'),
                       trailing: IconButton(
                         icon: const Icon(Icons.close, size: 18),
                         onPressed: () => setState(() => _items.removeAt(i)),
