@@ -954,6 +954,17 @@ class CoreThaan {
     required this.baleType,
     required this.billEntryDate,
     required this.perThaanMetres,
+    required this.transporter,
+    required this.invoiceNumber,
+    required this.invoiceDate,
+    required this.invoiceAmount,
+    required this.metresReceived,
+    required this.uom,
+    required this.gradeCode,
+    required this.needsSecondPrint,
+    required this.baleCount,
+    required this.baleNotes,
+    required this.baleStatus,
     required this.pipelineStatus,
     required this.qrGeneratedAt,
     required this.voidedAt,
@@ -969,6 +980,24 @@ class CoreThaan {
   final String baleType;
   final String billEntryDate;
   final double? perThaanMetres;
+
+  /// Everything else the bale carries — read live off it by slk-core, not
+  /// copied onto the Thaan, so a correction to the bale shows here too.
+  final String? transporter;
+  final String? invoiceNumber;
+  final String? invoiceDate;
+  final double? invoiceAmount;
+
+  /// The whole bale's metres; [perThaanMetres] is this Thaan's share of it.
+  final double metresReceived;
+  final String uom;
+  final String? gradeCode;
+  final bool needsSecondPrint;
+  final int baleCount;
+  final String? baleNotes;
+
+  /// `awaiting_cutting`, `cutting_in_progress`, `cut` or `returned`.
+  final String baleStatus;
 
   /// "Out for Salava", "Ready for Karakkaya", "Finished" — see slk-core's
   /// own `pipelineStatus()` in `lib/thaans.ts` for exactly how this reads.
@@ -995,6 +1024,17 @@ class CoreThaan {
         baleType: json['baleType'] as String,
         billEntryDate: json['billEntryDate'] as String,
         perThaanMetres: (json['perThaanMetres'] as num?)?.toDouble(),
+        transporter: json['transporter'] as String?,
+        invoiceNumber: json['invoiceNumber'] as String?,
+        invoiceDate: json['invoiceDate'] as String?,
+        invoiceAmount: (json['invoiceAmount'] as num?)?.toDouble(),
+        metresReceived: (json['metresReceived'] as num).toDouble(),
+        uom: json['uom'] as String,
+        gradeCode: json['gradeCode'] as String?,
+        needsSecondPrint: json['needsSecondPrint'] as bool,
+        baleCount: json['baleCount'] as int,
+        baleNotes: json['baleNotes'] as String?,
+        baleStatus: json['baleStatus'] as String,
         pipelineStatus: json['pipelineStatus'] as String,
         qrGeneratedAt: json['qrGeneratedAt'] as String?,
         voidedAt: json['voidedAt'] as String?,

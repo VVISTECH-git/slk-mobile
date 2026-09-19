@@ -189,8 +189,17 @@ class _ThaanCard extends StatelessWidget {
             _kv(context, 'Bale', t.baleCode),
             _kv(context, 'Supplier', t.supplierName),
             _kv(context, 'Item', '${t.itemName} · ${t.baleType}'),
+            if (t.gradeCode != null) _kv(context, 'Grade', t.gradeCode!),
+            _kv(context, 'Bale status', _baleStatusLabel(t.baleStatus)),
             _kv(context, 'Bale received', t.billEntryDate),
-            if (t.perThaanMetres != null) _kv(context, 'Metres (this Thaan\'s share)', '${t.perThaanMetres}'),
+            if (t.transporter != null) _kv(context, 'Transporter', t.transporter!),
+            if (t.invoiceNumber != null) _kv(context, 'Invoice', t.invoiceNumber!),
+            if (t.invoiceDate != null) _kv(context, 'Invoice date', t.invoiceDate!),
+            if (t.invoiceAmount != null) _kv(context, 'Invoice amount', '₹${t.invoiceAmount!.toStringAsFixed(2)}'),
+            _kv(context, 'Bale total', '${_num(t.metresReceived)} ${t.uom}${t.baleCount > 1 ? ' · ${t.baleCount} bales' : ''}'),
+            if (t.perThaanMetres != null) _kv(context, 'This Thaan\'s share', '${_num(t.perThaanMetres!)} ${t.uom}'),
+            _kv(context, 'Second print', t.needsSecondPrint ? 'Yes' : 'No'),
+            if (t.baleNotes != null && t.baleNotes!.isNotEmpty) _kv(context, 'Bale notes', t.baleNotes!),
             _kv(context, 'QR generated', t.qrGeneratedAt ?? 'Not yet'),
             if (t.voidedAt == null) ...[
               const SizedBox(height: 14),
@@ -209,6 +218,16 @@ class _ThaanCard extends StatelessWidget {
       ),
     );
   }
+
+  static String _num(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
+
+  static String _baleStatusLabel(String s) => switch (s) {
+        'awaiting_cutting' => 'Awaiting cutting',
+        'cutting_in_progress' => 'Cutting in progress',
+        'cut' => 'Cut',
+        'returned' => 'Returned',
+        _ => s,
+      };
 
   Widget _kv(BuildContext context, String k, String v) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 3),
