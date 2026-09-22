@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/api_client.dart';
 import '../../models/core.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/async_view.dart';
@@ -97,6 +98,9 @@ class _VendorDetailScreenState extends ConsumerState<VendorDetailScreen> {
       builder: (_) => const _RecordPaymentSheet(),
     );
     if (draft == null) return;
+    // One key per sheet the person filled in — a retry of this same payment
+    // reuses it, a new sheet gets a new one.
+    final key = idempotencyKey();
     await _run(
       () => ref.read(vendorRepositoryProvider).recordPayment(
             vendorId: widget.vendorId,
@@ -104,6 +108,7 @@ class _VendorDetailScreenState extends ConsumerState<VendorDetailScreen> {
             paidOn: draft.paidOn,
             method: draft.method,
             notes: draft.notes,
+            key: key,
           ),
     );
   }

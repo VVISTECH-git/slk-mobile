@@ -90,20 +90,28 @@ class VendorRepository {
 
   /// Money paid against this vendor's running balance, not tied to any
   /// particular transaction — for an advance or an adjustment.
+  ///
+  /// [key] is one [idempotencyKey] per save attempt, reused on retry, so a
+  /// payment can't be recorded twice by a tap that lost its response.
   Future<String> recordPayment({
     required String vendorId,
     required String amount,
     required String paidOn,
+    required String key,
     String method = '',
     String notes = '',
   }) async {
-    final data = await ref.read(coreApiProvider).post('/vendors/record-payment', body: {
-      'vendorId': vendorId,
-      'amount': amount,
-      'paidOn': paidOn,
-      'method': method,
-      'notes': notes,
-    });
+    final data = await ref.read(coreApiProvider).post(
+      '/vendors/record-payment',
+      body: {
+        'vendorId': vendorId,
+        'amount': amount,
+        'paidOn': paidOn,
+        'method': method,
+        'notes': notes,
+      },
+      headers: {'Idempotency-Key': key},
+    );
     return (data as Map)['message'] as String;
   }
 
