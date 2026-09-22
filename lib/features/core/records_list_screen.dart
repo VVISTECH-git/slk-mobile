@@ -207,23 +207,11 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: AppTextField(
-              label: 'Search',
+            child: SearchField(
               hint: 'Code, name, colour, consignment…',
               controller: _search,
               onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
-              textInputAction: TextInputAction.search,
               onSubmitted: (_) => _lookUpTyped(),
-              suffix: _query.isEmpty
-                  ? const Icon(Icons.search)
-                  : AppIconButton(
-                      icon: Icons.clear,
-                      tooltip: 'Clear the search',
-                      onPressed: () => setState(() {
-                        _search.clear();
-                        _query = '';
-                      }),
-                    ),
             ),
           ),
           Expanded(

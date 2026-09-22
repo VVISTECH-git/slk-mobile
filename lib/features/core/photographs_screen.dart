@@ -61,21 +61,10 @@ class _PhotographsScreenState extends ConsumerState<PhotographsScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: AppTextField(
-              label: 'Search',
+            child: SearchField(
               controller: _search,
-              onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
               hint: 'Consignment, name, colour, slot…',
-              suffix: _query.isEmpty
-                  ? const Icon(Icons.search)
-                  : AppIconButton(
-                      icon: Icons.clear,
-                      tooltip: 'Clear search',
-                      onPressed: () => setState(() {
-                        _search.clear();
-                        _query = '';
-                      }),
-                    ),
+              onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
             ),
           ),
           Expanded(

@@ -65,12 +65,9 @@ class _StageThaansScreenState extends ConsumerState<StageThaansScreen> {
                       tone: BadgeTone.brand,
                     ),
                     const SizedBox(height: 12),
-                    AppTextField(
-                      label: 'Search',
+                    SearchField(
                       controller: _query,
                       hint: 'Search bale or vendor…',
-                      suffix: const Icon(Icons.search, size: 20),
-                      textInputAction: TextInputAction.search,
                       onChanged: (_) => setState(() {}),
                     ),
                   ],

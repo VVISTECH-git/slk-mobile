@@ -69,21 +69,10 @@ class _RecordCuttingScreenState extends ConsumerState<RecordCuttingScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: AppTextField(
-              label: 'Search',
+            child: SearchField(
               hint: 'Search any bale by code',
               controller: _search,
               textCapitalization: TextCapitalization.characters,
-              suffix: _query.isEmpty
-                  ? null
-                  : AppIconButton(
-                      icon: Icons.clear,
-                      tooltip: 'Clear',
-                      onPressed: () {
-                        _search.clear();
-                        setState(() => _query = '');
-                      },
-                    ),
               onChanged: (v) => setState(() => _query = v.trim()),
             ),
           ),

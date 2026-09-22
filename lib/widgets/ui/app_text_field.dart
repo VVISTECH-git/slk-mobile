@@ -138,13 +138,17 @@ class SearchField extends StatelessWidget {
     required this.controller,
     required this.hint,
     this.onChanged,
+    this.onSubmitted,
     this.autofocus = false,
+    this.textCapitalization = TextCapitalization.none,
   });
 
   final TextEditingController controller;
   final String hint;
   final ValueChanged<String>? onChanged;
+  final ValueChanged<String>? onSubmitted;
   final bool autofocus;
+  final TextCapitalization textCapitalization;
 
   @override
   Widget build(BuildContext context) {
@@ -154,7 +158,9 @@ class SearchField extends StatelessWidget {
       builder: (context, value, _) => TextField(
         controller: controller,
         onChanged: onChanged,
+        onSubmitted: onSubmitted,
         autofocus: autofocus,
+        textCapitalization: textCapitalization,
         textInputAction: TextInputAction.search,
         style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: p.text),
         decoration: InputDecoration(
