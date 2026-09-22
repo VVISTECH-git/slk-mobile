@@ -3,8 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/theme_button.dart';
+import '../../widgets/ui/ui.dart';
 import 'core_auth.dart';
 
 /// What the phone can do, on one screen.
@@ -37,19 +36,18 @@ class CoreHomeScreen extends ConsumerWidget {
         if (actor != null && actor.hasAnyJobRole(module.jobRoles)) module,
     ];
 
-    return Scaffold(
-      backgroundColor: p.surface1,
-      appBar: AppBar(
-        title: const Text('SLK Stock'),
-        actions: [
-          const ThemeButton(),
-          IconButton(
-            tooltip: 'Sign out',
-            icon: const Icon(Icons.logout),
-            onPressed: () => ref.read(coreAuthProvider.notifier).signOut(),
-          ),
-        ],
-      ),
+    return AppPage(
+      title: 'SLK Stock',
+      padded: false,
+      actions: [
+        const ThemeButton(),
+        AppIconButton(
+          icon: Icons.logout,
+          tooltip: 'Sign out',
+          color: p.onAppBar,
+          onPressed: () => ref.read(coreAuthProvider.notifier).signOut(),
+        ),
+      ],
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
@@ -99,20 +97,10 @@ class _NoJobRoles extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: p.border),
-      ),
-      child: Text(
-        "Signed in, but nothing is assigned yet. Ask whoever manages Staff "
-        'to give this account a job role.',
-        style: TextStyle(fontSize: 13, color: p.textSecondary, height: 1.4),
-      ),
+    return const EmptyState(
+      icon: Icons.badge_outlined,
+      title: 'Signed in, but nothing is assigned yet.',
+      message: 'Ask whoever manages Staff to give this account a job role.',
     );
   }
 }
@@ -230,76 +218,58 @@ class _Tile extends StatelessWidget {
     final p = context.p;
     final ready = onTap != null;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: p.border),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: AppCard(
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: ready
-                      ? p.primary.withValues(alpha: 0.10)
-                      : p.surface3,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  module.icon,
-                  color: ready ? p.primary : p.textMuted,
-                ),
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: ready
+                    ? p.primary.withValues(alpha: 0.10)
+                    : p.surface3,
+                borderRadius: BorderRadius.circular(12),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      module.label,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
-                        color: ready ? p.text : p.textMuted,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      module.detail,
-                      // One line. The chip beside it is vertically centred, so
-                      // a wrapping description makes the two look tangled.
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12.5, color: p.textSecondary),
-                    ),
-                  ],
-                ),
+              child: Icon(
+                module.icon,
+                color: ready ? p.primary : p.textMuted,
               ),
-              if (ready)
-                Icon(Icons.chevron_right, color: p.textMuted)
-              else
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: p.surface3,
-                    borderRadius: BorderRadius.circular(20),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    module.label,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      color: ready ? p.text : p.textMuted,
+                    ),
                   ),
-                  child: Text(
-                    'Not built yet',
-                    style: TextStyle(fontSize: 11, color: p.textMuted),
+                  const SizedBox(height: 2),
+                  Text(
+                    module.detail,
+                    // One line. The chip beside it is vertically centred, so
+                    // a wrapping description makes the two look tangled.
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12.5, color: p.textSecondary),
                   ),
-                ),
-            ],
-          ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            if (ready)
+              Icon(Icons.chevron_right, color: p.textMuted)
+            else
+              const StatusBadge('Not built yet'),
+          ],
         ),
       ),
     );
@@ -315,13 +285,8 @@ class _Signed extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
 
-    return Container(
+    return AppCard(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: p.border),
-      ),
       child: Row(
         children: [
           Icon(Icons.badge_outlined, size: 18, color: p.textSecondary),

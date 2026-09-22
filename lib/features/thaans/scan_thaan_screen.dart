@@ -3,10 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
-import '../../widgets/picker_field.dart';
-import '../../widgets/theme_button.dart';
+import '../../widgets/ui/ui.dart';
 import '../handovers/handover_providers.dart' show coreVendorsProvider;
 import '../pos/barcode_scan_screen.dart';
 import 'thaan_providers.dart';
@@ -28,6 +25,7 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
   final _field = TextEditingController();
   final _focus = FocusNode();
   bool _busy = false;
+  String? _lookingUp;
   CoreThaan? _result;
   String? _resultCode;
   String? _notFoundCode;
@@ -44,6 +42,7 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
     if (code.isEmpty) return;
     setState(() {
       _busy = true;
+      _lookingUp = code;
       _result = null;
       _resultCode = null;
       _notFoundCode = null;
@@ -77,10 +76,13 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
   }
 
   Future<void> _flagDamaged(CoreThaan thaan, String code) async {
-    final flagged = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => _FlagDamagedSheet(code: code, thaan: thaan),
+    final flagged = await showAppSheet<bool>(
+      context,
+      title: 'Flag $code damaged',
+      subtitle: thaan.lastStage != null
+          ? 'Last at ${thaan.lastStage}${thaan.lastVendorName != null ? ' · ${thaan.lastVendorName}' : ''}.'
+          : 'No stage recorded for this Thaan yet.',
+      child: _FlagDamagedSheet(code: code, thaan: thaan),
     );
     if (flagged == true && mounted) {
       showOk(context, '$code marked damaged.');
@@ -90,59 +92,36 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Scan a Thaan'), actions: const [ThemeButton()]),
+    return AppPage(
+      title: 'Scan a Thaan',
+      actions: const [ThemeButton()],
+      padded: false,
       body: ListView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         padding: const EdgeInsets.all(16),
         children: [
-          Text(
-            "Scan a printed label's QR with the camera, or type its code.",
-            style: TextStyle(color: p.textSecondary),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _field,
-                  focusNode: _focus,
-                  autofocus: true,
-                  textCapitalization: TextCapitalization.characters,
-                  textInputAction: TextInputAction.search,
-                  decoration: const InputDecoration(
-                    labelText: 'Thaan code',
-                    hintText: 'e.g. T00002048',
-                    prefixIcon: Icon(Icons.qr_code),
-                    border: OutlineInputBorder(),
-                  ),
-                  onSubmitted: _lookup,
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton.filledTonal(
-                onPressed: _cameraScan,
-                icon: const Icon(Icons.photo_camera_outlined),
-                tooltip: 'Scan with camera',
-              ),
-            ],
+          AppTextField(
+            label: 'Thaan code',
+            hint: 'e.g. T00002048',
+            helper: "Scan a printed label's QR with the camera, or type its code.",
+            controller: _field,
+            focusNode: _focus,
+            autofocus: true,
+            textCapitalization: TextCapitalization.characters,
+            textInputAction: TextInputAction.search,
+            onSubmitted: _lookup,
           ),
           const SizedBox(height: 16),
-          if (_busy) const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator())),
+          if (_busy)
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: LoadingState(message: 'Looking up ${_lookingUp ?? 'the Thaan'}…'),
+            ),
           if (_notFoundCode != null && !_busy)
-            Card(
-              color: p.danger.withValues(alpha: 0.08),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Icon(Icons.error_outline, color: p.danger),
-                    const SizedBox(width: 10),
-                    Expanded(child: Text('No Thaan found for "$_notFoundCode".')),
-                  ],
-                ),
-              ),
+            EmptyState(
+              compact: true,
+              icon: Icons.search_off,
+              title: 'No Thaan found for "$_notFoundCode".',
             ),
           if (_result != null && !_busy)
             _ThaanCard(
@@ -150,6 +129,13 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
               onFlagDamaged: () => _flagDamaged(_result!, _resultCode!),
             ),
         ],
+      ),
+      bottomBar: BottomActionBar(
+        primary: AppButton.primary(
+          label: 'Scan with camera',
+          icon: Icons.photo_camera_outlined,
+          onPressed: _busy ? null : _cameraScan,
+        ),
       ),
     );
   }
@@ -162,66 +148,50 @@ class _ThaanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
     final t = thaan;
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(child: Text(t.code ?? '—', style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w800, fontSize: 17))),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(color: p.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
-                  child: Text(t.pipelineStatus, style: TextStyle(color: p.primary, fontWeight: FontWeight.w700, fontSize: 12)),
-                ),
-              ],
-            ),
-            if (t.voidedAt != null) ...[
-              const SizedBox(height: 6),
-              Text('Voided on ${t.voidedAt}', style: TextStyle(color: p.danger, fontWeight: FontWeight.w600)),
-            ],
-            const Divider(height: 20),
-            _kv(context, 'Bale', t.baleCode),
-            _kv(context, 'Supplier', t.supplierName),
-            _kv(context, 'Item', '${t.itemName} · ${t.baleType}'),
-            if (t.gradeCode != null) _kv(context, 'Grade', t.gradeCode!),
-            ..._clothRows(context),
-            _kv(context, 'Bale status', _baleStatusLabel(t.baleStatus)),
-            _kv(context, 'Bale received', t.billEntryDate),
-            if (t.transporter != null) _kv(context, 'Transporter', t.transporter!),
-            if (t.invoiceNumber != null) _kv(context, 'Invoice', t.invoiceNumber!),
-            if (t.invoiceDate != null) _kv(context, 'Invoice date', t.invoiceDate!),
-            if (t.invoiceAmount != null) _kv(context, 'Invoice amount', '₹${t.invoiceAmount!.toStringAsFixed(2)}'),
-            _kv(context, 'Bale total', '${_num(t.metresReceived)} ${t.uom}${t.baleCount > 1 ? ' · ${t.baleCount} bales' : ''}'),
-            if (t.perThaanMetres != null) _kv(context, 'This Thaan\'s share', '${_num(t.perThaanMetres!)} ${t.uom}'),
-            _kv(context, 'Second print', t.needsSecondPrint ? 'Yes' : 'No'),
-            if (t.baleNotes != null && t.baleNotes!.isNotEmpty) _kv(context, 'Bale notes', t.baleNotes!),
-            _kv(context, 'QR generated', t.qrGeneratedAt ?? 'Not yet'),
-            if (t.voidedAt == null) ...[
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: onFlagDamaged,
-                  style: OutlinedButton.styleFrom(foregroundColor: p.danger, side: BorderSide(color: p.danger)),
-                  icon: const Icon(Icons.report_gmailerrorred_outlined),
-                  label: const Text('Flag as damaged'),
-                ),
-              ),
-            ],
+    return AppCard(
+      emphasis: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CardTitle(t.code ?? '—', trailing: StatusBadge.pipeline(t.pipelineStatus)),
+          if (t.voidedAt != null) ...[
+            const SizedBox(height: 10),
+            InlineNotice('Voided on ${t.voidedAt}', icon: Icons.block, warning: true),
           ],
-        ),
+          const Divider(height: 20),
+          KeyValueRow('Bale', t.baleCode, mono: true),
+          KeyValueRow('Supplier', t.supplierName),
+          KeyValueRow('Item', '${t.itemName} · ${t.baleType}'),
+          if (t.gradeCode != null) KeyValueRow('Grade', t.gradeCode!),
+          ..._clothRows(),
+          KeyValueRow('Bale status', _baleStatusLabel(t.baleStatus)),
+          KeyValueRow('Bale received', t.billEntryDate),
+          if (t.transporter != null) KeyValueRow('Transporter', t.transporter!),
+          if (t.invoiceNumber != null) KeyValueRow('Invoice', t.invoiceNumber!),
+          if (t.invoiceDate != null) KeyValueRow('Invoice date', t.invoiceDate!),
+          if (t.invoiceAmount != null) KeyValueRow('Invoice amount', '₹${t.invoiceAmount!.toStringAsFixed(2)}'),
+          KeyValueRow('Bale total', '${_num(t.metresReceived)} ${t.uom}${t.baleCount > 1 ? ' · ${t.baleCount} bales' : ''}'),
+          if (t.perThaanMetres != null) KeyValueRow('This Thaan\'s share', '${_num(t.perThaanMetres!)} ${t.uom}'),
+          KeyValueRow('Second print', t.needsSecondPrint ? 'Yes' : 'No'),
+          if (t.baleNotes != null && t.baleNotes!.isNotEmpty) KeyValueRow('Bale notes', t.baleNotes!),
+          KeyValueRow('QR generated', t.qrGeneratedAt ?? 'Not yet'),
+          if (t.voidedAt == null) ...[
+            const SizedBox(height: 14),
+            AppButton.danger(
+              label: 'Flag as damaged',
+              icon: Icons.report_gmailerrorred_outlined,
+              onPressed: onFlagDamaged,
+            ),
+          ],
+        ],
       ),
     );
   }
 
   /// The cloth item's properties — only the ones it actually fixed.
-  List<Widget> _clothRows(BuildContext context) {
+  List<Widget> _clothRows() {
     final t = thaan;
     final rows = <(String, String?)>[
       ('Fibre', t.fibre),
@@ -248,7 +218,7 @@ class _ThaanCard extends StatelessWidget {
     ];
     return [
       for (final (k, v) in rows)
-        if (v != null && v.isNotEmpty) _kv(context, k, v),
+        if (v != null && v.isNotEmpty) KeyValueRow(k, v),
     ];
   }
 
@@ -261,24 +231,15 @@ class _ThaanCard extends StatelessWidget {
         'returned' => 'Returned',
         _ => s,
       };
-
-  Widget _kv(BuildContext context, String k, String v) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(k, style: TextStyle(color: context.p.textSecondary)),
-            const SizedBox(width: 12),
-            Flexible(child: Text(v, textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w600))),
-          ],
-        ),
-      );
 }
 
 /// Flags [code] damaged. Pre-fills the vendor from [thaan]'s own
 /// `lastVendorId` (whoever most recently held it) — auto-derived, but
 /// changeable here, since the derived guess isn't always who's actually
 /// responsible.
+///
+/// Rendered inside [showAppSheet], which supplies the grabber, title,
+/// last-stage subtitle and keyboard inset — this is only the content.
 class _FlagDamagedSheet extends ConsumerStatefulWidget {
   const _FlagDamagedSheet({required this.code, required this.thaan});
   final String code;
@@ -323,84 +284,39 @@ class _FlagDamagedSheetState extends ConsumerState<_FlagDamagedSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
     final vendors = ref.watch(coreVendorsProvider);
-    final t = widget.thaan;
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 20, 16, MediaQuery.of(context).viewInsets.bottom + 16),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.report_gmailerrorred, color: p.danger),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Flag ${widget.code} damaged',
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                t.lastStage != null
-                    ? 'Last at ${t.lastStage}${t.lastVendorName != null ? ' · ${t.lastVendorName}' : ''}.'
-                    : 'No stage recorded for this Thaan yet.',
-                style: TextStyle(color: p.textSecondary),
-              ),
-              const SizedBox(height: 16),
-              vendors.when(
-                loading: () => const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: LinearProgressIndicator(),
-                ),
-                error: (e, _) => Text('$e', style: TextStyle(color: p.danger)),
-                data: (rows) => PickerField(
-                  label: 'Vendor',
-                  value: _vendorId,
-                  hint: 'None (in-house or unknown)',
-                  allowClear: true,
-                  options: [for (final v in rows) PickerOption(v.id, v.name)],
-                  onChanged: (v) => setState(() => _vendorId = v),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _notes,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Notes',
-                  hintText: "What's wrong with it — optional",
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _busy ? null : _submit,
-                  style: FilledButton.styleFrom(backgroundColor: p.danger),
-                  icon: _busy
-                      ? const SizedBox(
-                          height: 18,
-                          width: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Icon(Icons.report_gmailerrorred),
-                  label: Text(_busy ? 'Flagging…' : 'Flag as damaged'),
-                ),
-              ),
-            ],
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        vendors.when(
+          loading: () => const Skeleton(height: 48, radius: 12),
+          error: (e, _) => InlineNotice('$e', icon: Icons.cloud_off_outlined, warning: true),
+          data: (rows) => PickerField(
+            label: 'Vendor',
+            value: _vendorId,
+            hint: 'None (in-house or unknown)',
+            allowClear: true,
+            options: [for (final v in rows) PickerOption(v.id, v.name)],
+            onChanged: (v) => setState(() => _vendorId = v),
           ),
         ),
-      ),
+        const SizedBox(height: 12),
+        AppTextField(
+          label: 'Notes',
+          hint: "What's wrong with it — optional",
+          controller: _notes,
+          maxLines: 3,
+        ),
+        const SizedBox(height: 16),
+        AppButton.danger(
+          label: 'Flag as damaged',
+          icon: Icons.report_gmailerrorred,
+          busy: _busy,
+          onPressed: _submit,
+        ),
+      ],
     );
   }
 }

@@ -2,10 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
-import '../../widgets/picker_field.dart';
-import '../../widgets/theme_button.dart';
+import '../../widgets/ui/ui.dart';
 import '../production/continuous_scanner.dart';
 import 'handover_providers.dart';
 
@@ -71,6 +68,27 @@ List<String> summarizeProblems(List<ScanProblem> problems) {
   ];
 }
 
+/// The scans that didn't make it into the batch, one notice per reason —
+/// see [summarizeProblems]. Shared by Send ("Not sent") and Receive ("Not
+/// received").
+void _showProblemsSheet(BuildContext context, {required String title, required List<ScanProblem> problems}) {
+  final lines = summarizeProblems(problems);
+  showAppSheet<void>(
+    context,
+    title: title,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final line in lines)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: InlineNotice(line, warning: true, icon: Icons.error_outline),
+          ),
+      ],
+    ),
+  );
+}
+
 /// Kora to Shelf, step three: a Thaan's trip through the stage pipeline.
 ///
 /// Everything here happens by scanning a Thaan's own QR code — the same
@@ -92,26 +110,37 @@ class _HandoversScreenState extends State<HandoversScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Handovers'),
-        actions: const [ThemeButton()],
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: true, label: Text('Send'), icon: Icon(Icons.north_east)),
-                ButtonSegment(value: false, label: Text('Receive'), icon: Icon(Icons.south_west)),
-              ],
-              selected: {_sending},
-              onSelectionChanged: (s) => setState(() => _sending = s.first),
-            ),
-          ),
-          Expanded(child: _sending ? const _SendPanel() : const _ReceivePanel()),
-        ],
+    // Each panel frames itself in an [AppPage] so its own Send / Receive
+    // confirm can sit in the page's [BottomActionBar]; the Send / Receive
+    // toggle is handed down to sit at the top of either body. Switching
+    // swaps the whole panel (and so its scanned batch), as it always did.
+    final toggle = _ModeToggle(sending: _sending, onChanged: (v) => setState(() => _sending = v));
+    return _sending ? _SendPanel(toggle: toggle) : _ReceivePanel(toggle: toggle);
+  }
+}
+
+/// Send | Receive. A segmented control, since the library has no
+/// two-way switch of its own; sized so each half is a full 48 px target.
+class _ModeToggle extends StatelessWidget {
+  const _ModeToggle({required this.sending, required this.onChanged});
+  final bool sending;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: SizedBox(
+        width: double.infinity,
+        child: SegmentedButton<bool>(
+          style: SegmentedButton.styleFrom(minimumSize: const Size(0, 48)),
+          segments: const [
+            ButtonSegment(value: true, label: Text('Send'), icon: Icon(Icons.north_east)),
+            ButtonSegment(value: false, label: Text('Receive'), icon: Icon(Icons.south_west)),
+          ],
+          selected: {sending},
+          onSelectionChanged: (s) => onChanged(s.first),
+        ),
       ),
     );
   }
@@ -128,7 +157,8 @@ class _ScanOutcome<T> {
 // ── Send ─────────────────────────────────────────────────────────────────
 
 class _SendPanel extends ConsumerStatefulWidget {
-  const _SendPanel();
+  const _SendPanel({required this.toggle});
+  final Widget toggle;
 
   @override
   ConsumerState<_SendPanel> createState() => _SendPanelState();
@@ -183,7 +213,9 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
       _dropIneligibleVendor();
       _busy = false;
     });
-    if (outcome.problems.isNotEmpty) _showProblems(outcome.problems);
+    if (outcome.problems.isNotEmpty) {
+      _showProblemsSheet(context, title: 'Not sent', problems: outcome.problems);
+    }
   }
 
   /// Resolves each newly scanned code against `/handovers/lookup-send`, in
@@ -213,58 +245,19 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
     return _ScanOutcome(resolved: resolved, problems: problems);
   }
 
-  void _showProblems(List<ScanProblem> problems) {
-    final lines = summarizeProblems(problems);
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (_) => DraggableScrollableSheet(
-        initialChildSize: 0.5,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (_, scrollController) => SafeArea(
-          child: ListView(
-            controller: scrollController,
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            children: [
-              Text(
-                'Not sent',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: context.p.danger),
-              ),
-              const SizedBox(height: 8),
-              for (final line in lines)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(line, style: const TextStyle(fontSize: 13)),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Future<void> _confirmSend() async {
     if (_items.isEmpty || _stage == null || _vendorId == null) return;
     final stage = _stage!;
 
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text('Send ${_items.length} Thaan${_items.length == 1 ? '' : 's'} for ${tripLabel(stage, _through)}?'),
-        content: Text(
-          _vendorId == _vendorInHouse
-              ? 'Going to in-house.'
-              : 'Going to ${ref.read(coreVendorsProvider).value?.firstWhere((v) => v.id == _vendorId).name ?? 'that vendor'}.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Send')),
-        ],
-      ),
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Send ${_items.length} Thaan${_items.length == 1 ? '' : 's'} for ${tripLabel(stage, _through)}?',
+      message: _vendorId == _vendorInHouse
+          ? 'Going to in-house.'
+          : 'Going to ${ref.read(coreVendorsProvider).value?.firstWhere((v) => v.id == _vendorId).name ?? 'that vendor'}.',
+      confirmLabel: 'Send',
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
 
     setState(() => _busy = true);
     try {
@@ -294,130 +287,120 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
     // A choice made for another vendor or stage doesn't carry over.
     if (_through != null && !also.contains(_through)) _through = null;
 
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Expanded(
-                child: PickerField(
-                  label: 'Stage',
-                  value: _stage ?? _inHouse,
-                  hint: 'Auto',
-                  allowClear: true,
-                  options: [
-                    PickerOption(_inHouse, 'Auto'),
-                    ...plainOptions(kSendableStages),
-                  ],
-                  onChanged: (v) => setState(() {
-                    _stage = (v == null || v == _inHouse) ? null : v;
-                    _dropIneligibleVendor();
-                    _items.clear();
-                  }),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: vendors.when(
-                  loading: () => const LinearProgressIndicator(),
-                  error: (e, _) => Text('$e', style: TextStyle(color: context.p.danger)),
-                  data: (rows) => PickerField(
-                    label: 'Vendor',
-                    value: _vendorId,
-                    hint: 'Choose…',
-                    // Once a stage is known, only vendors who actually do it are
-                    // worth offering — see _dropIneligibleVendor.
-                    options: [
-                      const PickerOption(_vendorInHouse, 'In-house'),
-                      for (final v in rows)
-                        if (_stage == null || v.stages.contains(_stage)) PickerOption(v.id, v.name),
-                    ],
-                    onChanged: (v) => setState(() {
-                      _vendorId = v;
-                    }),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (also.isNotEmpty)
+    return AppPage(
+      title: 'Handovers',
+      actions: const [ThemeButton()],
+      padded: false,
+      body: Column(
+        children: [
+          widget.toggle,
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: PickerField(
-              label: 'Stages this trip',
-              value: _through ?? _inHouse,
-              options: [
-                PickerOption(_inHouse, '${_stage!} only'),
-                for (final s in also) PickerOption(s, tripLabel(_stage!, s)),
-              ],
-              onChanged: (v) => setState(() => _through = (v == null || v == _inHouse) ? null : v),
-            ),
-          ),
-        if (_items.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () => setState(_items.clear),
-                child: const Text('Clear'),
-              ),
-            ),
-          ),
-        Expanded(
-          child: _items.isEmpty
-              ? Center(
-                  child: Text('Nothing scanned yet.', style: TextStyle(color: context.p.textSecondary)),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: _items.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (_, i) {
-                    final t = _items[i];
-                    return ListTile(
-                      dense: true,
-                      title: Text(t.code, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w700)),
-                      subtitle: Text('${t.baleCode} · ${t.itemName}'),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.close, size: 18),
-                        onPressed: () => setState(() => _items.removeAt(i)),
-                      ),
-                    );
-                  },
-                ),
-        ),
-        SafeArea(
-          child: Padding(
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
                 Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _busy ? null : _scan,
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text('Scan'),
-                    style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+                  child: PickerField(
+                    label: 'Stage',
+                    value: _stage ?? _inHouse,
+                    hint: 'Auto',
+                    allowClear: true,
+                    options: [
+                      PickerOption(_inHouse, 'Auto'),
+                      ...plainOptions(kSendableStages),
+                    ],
+                    onChanged: (v) => setState(() {
+                      _stage = (v == null || v == _inHouse) ? null : v;
+                      _dropIneligibleVendor();
+                      _items.clear();
+                    }),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _busy || _items.isEmpty || _stage == null || _vendorId == null ? null : _confirmSend,
-                    icon: _busy
-                        ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.north_east),
-                    label: Text('Send${_items.isNotEmpty ? ' ${_items.length}' : ''}'),
-                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+                  child: vendors.when(
+                    loading: () => const Skeleton(height: 52, radius: 12),
+                    error: (e, _) => InlineNotice('$e', warning: true),
+                    data: (rows) => PickerField(
+                      label: 'Vendor',
+                      value: _vendorId,
+                      hint: 'Choose…',
+                      // Once a stage is known, only vendors who actually do it are
+                      // worth offering — see _dropIneligibleVendor.
+                      options: [
+                        const PickerOption(_vendorInHouse, 'In-house'),
+                        for (final v in rows)
+                          if (_stage == null || v.stages.contains(_stage)) PickerOption(v.id, v.name),
+                      ],
+                      onChanged: (v) => setState(() {
+                        _vendorId = v;
+                      }),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
+          if (also.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: PickerField(
+                label: 'Stages this trip',
+                value: _through ?? _inHouse,
+                options: [
+                  PickerOption(_inHouse, '${_stage!} only'),
+                  for (final s in also) PickerOption(s, tripLabel(_stage!, s)),
+                ],
+                onChanged: (v) => setState(() => _through = (v == null || v == _inHouse) ? null : v),
+              ),
+            ),
+          if (_items.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SectionHeader(
+                'Scanned',
+                top: 0,
+                trailing: AppButton.ghost(label: 'Clear', compact: true, onPressed: () => setState(_items.clear)),
+              ),
+            ),
+          Expanded(
+            child: _items.isEmpty
+                ? const EmptyState(title: 'Nothing scanned yet.', icon: Icons.qr_code_scanner)
+                : ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    children: [
+                      AppListGroup(
+                        children: [
+                          for (final (i, t) in _items.indexed)
+                            AppListRow(
+                              title: t.code,
+                              titleMono: true,
+                              subtitle: '${t.baleCode} · ${t.itemName}',
+                              trailing: AppIconButton(
+                                icon: Icons.close,
+                                tooltip: 'Remove',
+                                onPressed: () => setState(() => _items.removeAt(i)),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
+      bottomBar: BottomActionBar(
+        secondary: AppButton.secondary(
+          label: 'Scan',
+          icon: Icons.qr_code_scanner,
+          onPressed: _busy ? null : _scan,
         ),
-      ],
+        primary: AppButton.primary(
+          label: 'Send${_items.isNotEmpty ? ' ${_items.length}' : ''}',
+          icon: Icons.north_east,
+          busy: _busy,
+          onPressed: _items.isEmpty || _stage == null || _vendorId == null ? null : _confirmSend,
+        ),
+      ),
     );
   }
 }
@@ -425,7 +408,8 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
 // ── Receive ──────────────────────────────────────────────────────────────
 
 class _ReceivePanel extends ConsumerStatefulWidget {
-  const _ReceivePanel();
+  const _ReceivePanel({required this.toggle});
+  final Widget toggle;
 
   @override
   ConsumerState<_ReceivePanel> createState() => _ReceivePanelState();
@@ -463,35 +447,7 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
       _busy = false;
     });
     if (problems.isNotEmpty) {
-      final lines = summarizeProblems(problems);
-      showModalBottomSheet<void>(
-        context: context,
-        showDragHandle: true,
-        isScrollControlled: true,
-        builder: (_) => DraggableScrollableSheet(
-          initialChildSize: 0.5,
-          maxChildSize: 0.9,
-          expand: false,
-          builder: (_, scrollController) => SafeArea(
-            child: ListView(
-              controller: scrollController,
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              children: [
-                Text(
-                  'Not received',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: context.p.danger),
-                ),
-                const SizedBox(height: 8),
-                for (final line in lines)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(line, style: const TextStyle(fontSize: 13)),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      );
+      _showProblemsSheet(context, title: 'Not received', problems: problems);
     }
   }
 
@@ -508,18 +464,13 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
         ? 'Receiving ${_items.length} Thaan${_items.length == 1 ? '' : 's'} after ${stages.first}?'
         : 'Receive ${_items.length} Thaan${_items.length == 1 ? '' : 's'}?';
 
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(title),
-        content: const Text('Confirm all of these are physically back in hand.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Receive')),
-        ],
-      ),
+    final ok = await showConfirmDialog(
+      context,
+      title: title,
+      message: 'Confirm all of these are physically back in hand.',
+      confirmLabel: 'Receive',
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
 
     setState(() => _busy = true);
     try {
@@ -536,67 +487,67 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: Text(
-            "Scan whatever's coming back — it doesn't matter which stage or which vendor each piece is from.",
-            style: TextStyle(fontSize: 13, color: context.p.textSecondary),
-          ),
-        ),
-        Expanded(
-          child: _items.isEmpty
-              ? Center(
-                  child: Text('Nothing scanned yet.', style: TextStyle(color: context.p.textSecondary)),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: _items.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (_, i) {
-                    final t = _items[i];
-                    return ListTile(
-                      dense: true,
-                      title: Text(t.code, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w700)),
-                      subtitle: Text('${t.baleCode} · ${t.vendorName} — ${tripLabel(t.stage, t.throughStage)}'),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.close, size: 18),
-                        onPressed: () => setState(() => _items.removeAt(i)),
-                      ),
-                    );
-                  },
-                ),
-        ),
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _busy ? null : _scan,
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text('Scan'),
-                    style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _busy || _items.isEmpty ? null : _confirmReceive,
-                    icon: _busy
-                        ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.south_west),
-                    label: Text('Receive${_items.isNotEmpty ? ' ${_items.length}' : ''}'),
-                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-                  ),
-                ),
-              ],
+    return AppPage(
+      title: 'Handovers',
+      actions: const [ThemeButton()],
+      padded: false,
+      body: Column(
+        children: [
+          widget.toggle,
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: InlineNotice(
+              "Scan whatever's coming back — it doesn't matter which stage or which vendor each piece is from.",
             ),
           ),
+          if (_items.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SectionHeader(
+                'Scanned',
+                top: 0,
+                trailing: AppButton.ghost(label: 'Clear', compact: true, onPressed: () => setState(_items.clear)),
+              ),
+            ),
+          Expanded(
+            child: _items.isEmpty
+                ? const EmptyState(title: 'Nothing scanned yet.', icon: Icons.qr_code_scanner)
+                : ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    children: [
+                      AppListGroup(
+                        children: [
+                          for (final (i, t) in _items.indexed)
+                            AppListRow(
+                              title: t.code,
+                              titleMono: true,
+                              subtitle: '${t.baleCode} · ${t.vendorName} — ${tripLabel(t.stage, t.throughStage)}',
+                              trailing: AppIconButton(
+                                icon: Icons.close,
+                                tooltip: 'Remove',
+                                onPressed: () => setState(() => _items.removeAt(i)),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
+      bottomBar: BottomActionBar(
+        secondary: AppButton.secondary(
+          label: 'Scan',
+          icon: Icons.qr_code_scanner,
+          onPressed: _busy ? null : _scan,
         ),
-      ],
+        primary: AppButton.primary(
+          label: 'Receive${_items.isNotEmpty ? ' ${_items.length}' : ''}',
+          icon: Icons.south_west,
+          busy: _busy,
+          onPressed: _items.isEmpty ? null : _confirmReceive,
+        ),
+      ),
     );
   }
 }

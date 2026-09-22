@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
-import '../../widgets/theme_button.dart';
+import '../../widgets/ui/ui.dart';
 import 'stage_summary_providers.dart';
 import 'stage_thaans_screen.dart';
 
@@ -34,8 +32,10 @@ class _StageSummaryScreenState extends ConsumerState<StageSummaryScreen> {
   Widget build(BuildContext context) {
     final showToggle = widget.baleType == null;
 
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.baleType ?? 'Stage Summary'), actions: const [ThemeButton()]),
+    return AppPage(
+      title: widget.baleType ?? 'Stage Summary',
+      actions: const [ThemeButton()],
+      padded: false,
       body: Column(
         children: [
           if (showToggle)
@@ -63,6 +63,8 @@ class _StageSummaryScreenState extends ConsumerState<StageSummaryScreen> {
   }
 }
 
+/// By Stage | By Type. A segmented control, since the library has no
+/// two-way switch of its own; sized so each half is a full 48 px target.
 class _ViewToggle extends StatelessWidget {
   const _ViewToggle({required this.view, required this.onChanged});
   final _View view;
@@ -70,13 +72,17 @@ class _ViewToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SegmentedButton<_View>(
-      segments: const [
-        ButtonSegment(value: _View.byStage, label: Text('By Stage')),
-        ButtonSegment(value: _View.byType, label: Text('By Type')),
-      ],
-      selected: {view},
-      onSelectionChanged: (s) => onChanged(s.first),
+    return SizedBox(
+      width: double.infinity,
+      child: SegmentedButton<_View>(
+        style: SegmentedButton.styleFrom(minimumSize: const Size(0, 48)),
+        segments: const [
+          ButtonSegment(value: _View.byStage, label: Text('By Stage')),
+          ButtonSegment(value: _View.byType, label: Text('By Type')),
+        ],
+        selected: {view},
+        onSelectionChanged: (s) => onChanged(s.first),
+      ),
     );
   }
 }
@@ -103,9 +109,12 @@ class _StageList extends ConsumerWidget {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
             children: [
-              Text(
-                '$total Thaan${total == 1 ? "" : "s"} ${baleType != null ? "of $baleType " : ""}across the pipeline right now.',
-                style: TextStyle(color: context.p.textSecondary, fontSize: 12.5),
+              AppCard(
+                child: StatTile(
+                  value: '$total',
+                  label: 'Thaan${total == 1 ? "" : "s"} ${baleType != null ? "of $baleType " : ""}across the pipeline right now.',
+                  tone: BadgeTone.brand,
+                ),
               ),
               const SizedBox(height: 14),
               for (final row in rows)
@@ -145,9 +154,8 @@ class _TypeList extends ConsumerWidget {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
             children: [
-              Text(
+              const InlineNotice(
                 "How close each bale type is to fully Finished — a type near the top with little left behind it is one to reorder raw cloth for.",
-                style: TextStyle(color: context.p.textSecondary, fontSize: 12.5),
               ),
               const SizedBox(height: 14),
               for (final row in sorted)
@@ -178,69 +186,46 @@ class _TypeRow extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: needsReorder ? p.primary.withValues(alpha: 0.6) : p.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Row(
-                        children: [
-                          Text(row.type, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: p.text)),
-                          if (needsReorder) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: p.primary.withValues(alpha: 0.14),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                'Consider reordering',
-                                style: TextStyle(color: p.primary, fontWeight: FontWeight.w700, fontSize: 10.5),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    Text(
-                      '${(row.finishedFraction * 100).round()}%',
-                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: p.text),
-                    ),
+      child: AppCard(
+        onTap: onTap,
+        emphasis: needsReorder,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CardTitle(
+              row.type,
+              subtitle: '${row.finished} of ${row.total} Finished · $remaining still in the pipeline',
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (needsReorder) ...[
+                    const StatusBadge('Consider reordering', tone: BadgeTone.brand),
+                    const SizedBox(width: 8),
                   ],
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${row.finished} of ${row.total} Finished · $remaining still in the pipeline',
-                  style: TextStyle(color: p.textSecondary, fontSize: 11.5),
-                ),
-                const SizedBox(height: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(3),
-                  child: LinearProgressIndicator(
-                    value: row.finishedFraction.clamp(0.02, 1.0),
-                    minHeight: 5,
-                    backgroundColor: p.surface3,
-                    valueColor: AlwaysStoppedAnimation(needsReorder ? p.primary : p.textMuted),
+                  Text(
+                    '${(row.finishedFraction * 100).round()}%',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                      color: p.text,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: LinearProgressIndicator(
+                value: row.finishedFraction.clamp(0.02, 1.0),
+                minHeight: 5,
+                backgroundColor: p.surface3,
+                valueColor: AlwaysStoppedAnimation(needsReorder ? p.primary : p.textMuted),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -258,65 +243,61 @@ class _StageRow extends StatelessWidget {
     final p = context.p;
     final fraction = row.count / maxCount;
     final isTerminal = row.bucket == 'Not started' || row.bucket == 'Finished';
+    final stale = (row.oldestDaysWaiting ?? 0) >= 14;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), border: Border.all(color: p.border)),
-            child: Column(
+      child: AppCard(
+        onTap: onTap,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        row.bucket,
-                        style: TextStyle(
-                          fontWeight: isTerminal ? FontWeight.w500 : FontWeight.w700,
-                          fontStyle: isTerminal ? FontStyle.italic : FontStyle.normal,
-                          color: isTerminal ? p.textSecondary : p.text,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      '${row.count}',
-                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: p.text),
-                    ),
-                  ],
-                ),
-                if (row.oldestDaysWaiting != null) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    'Oldest waiting ${row.oldestDaysWaiting} day${row.oldestDaysWaiting == 1 ? "" : "s"} (since ${row.oldestSince})',
+                Expanded(
+                  child: Text(
+                    row.bucket,
                     style: TextStyle(
-                      color: row.oldestDaysWaiting! >= 14 ? p.danger : p.textSecondary,
-                      fontWeight: row.oldestDaysWaiting! >= 14 ? FontWeight.w700 : FontWeight.w400,
-                      fontSize: 11.5,
+                      fontWeight: isTerminal ? FontWeight.w500 : FontWeight.w800,
+                      fontStyle: isTerminal ? FontStyle.italic : FontStyle.normal,
+                      color: isTerminal ? p.textSecondary : p.text,
+                      fontSize: 16,
                     ),
                   ),
-                ],
-                const SizedBox(height: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(3),
-                  child: LinearProgressIndicator(
-                    value: fraction.clamp(0.02, 1.0),
-                    minHeight: 5,
-                    backgroundColor: p.surface3,
-                    valueColor: AlwaysStoppedAnimation(isTerminal ? p.textMuted : p.primary),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  '${row.count}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                    color: p.text,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
               ],
             ),
-          ),
+            if (row.oldestDaysWaiting != null) ...[
+              const SizedBox(height: 6),
+              StatusBadge(
+                'Oldest waiting ${row.oldestDaysWaiting} day${row.oldestDaysWaiting == 1 ? "" : "s"} (since ${row.oldestSince})',
+                tone: stale ? BadgeTone.danger : BadgeTone.neutral,
+                icon: Icons.schedule,
+              ),
+            ],
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: LinearProgressIndicator(
+                value: fraction.clamp(0.02, 1.0),
+                minHeight: 5,
+                backgroundColor: p.surface3,
+                valueColor: AlwaysStoppedAnimation(isTerminal ? p.textMuted : p.primary),
+              ),
+            ),
+          ],
         ),
       ),
     );

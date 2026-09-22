@@ -4,9 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
-import '../../widgets/theme_button.dart';
+import '../../widgets/ui/ui.dart';
 import 'bale_providers.dart';
 import 'thaan_labels_screen.dart';
 
@@ -44,12 +42,11 @@ class _RecordCuttingScreenState extends ConsumerState<RecordCuttingScreen> {
       showError(context, '${bale.code} is already ${bale.status == 'cut' ? 'cut' : 'returned'} — nothing more to record.');
       return;
     }
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: context.p.surface2,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _RecordThaansSheet(bale: bale),
+    showAppSheet<void>(
+      context,
+      title: '${bale.code} · ${bale.supplierName}',
+      subtitle: '${bale.itemName} · ${bale.metresReceived} ${bale.uom}',
+      child: _RecordThaansSheet(bale: bale),
     ).then((_) => ref.invalidate(coreBalesProvider));
   }
 
@@ -57,38 +54,36 @@ class _RecordCuttingScreenState extends ConsumerState<RecordCuttingScreen> {
   Widget build(BuildContext context) {
     final bales = ref.watch(coreBalesProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Record Cutting'),
-        actions: [
-          const ThemeButton(),
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: () => ref.invalidate(coreBalesProvider),
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
+    return AppPage(
+      title: 'Record Cutting',
+      actions: [
+        const ThemeButton(),
+        AppIconButton(
+          icon: Icons.refresh,
+          tooltip: 'Refresh',
+          onPressed: () => ref.invalidate(coreBalesProvider),
+        ),
+      ],
+      padded: false,
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: TextField(
+            child: AppTextField(
+              label: 'Search',
+              hint: 'Search any bale by code',
               controller: _search,
               textCapitalization: TextCapitalization.characters,
-              decoration: InputDecoration(
-                hintText: 'Search any bale by code',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _query.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _search.clear();
-                          setState(() => _query = '');
-                        },
-                      ),
-              ),
+              suffix: _query.isEmpty
+                  ? null
+                  : AppIconButton(
+                      icon: Icons.clear,
+                      tooltip: 'Clear',
+                      onPressed: () {
+                        _search.clear();
+                        setState(() => _query = '');
+                      },
+                    ),
               onChanged: (v) => setState(() => _query = v.trim()),
             ),
           ),
@@ -109,26 +104,16 @@ class _RecordCuttingScreenState extends ConsumerState<RecordCuttingScreen> {
                 }
 
                 if (shown.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(emptyMessage, textAlign: TextAlign.center, style: TextStyle(color: context.p.textSecondary)),
-                    ),
-                  );
+                  return EmptyState(icon: Icons.content_cut, title: emptyMessage);
                 }
 
                 return ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                   children: [
-                    if (_query.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8, left: 4),
-                        child: Text(
-                          'Waiting on cutting',
-                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: context.p.textSecondary),
-                        ),
-                      ),
-                    for (final b in shown) _BaleRow(bale: b, onTap: () => _openRecordSheet(b)),
+                    if (_query.isEmpty) SectionHeader('Waiting on cutting', top: 4, trailing: Text('${shown.length}')),
+                    AppListGroup(
+                      children: [for (final b in shown) _BaleRow(bale: b, onTap: () => _openRecordSheet(b))],
+                    ),
                   ],
                 );
               },
@@ -148,48 +133,20 @@ class _BaleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
-    final statusColor = switch (bale.status) {
-      'cut' => p.success,
-      'returned' => p.danger,
-      'cutting_in_progress' => p.accent,
-      _ => p.textSecondary,
+    final tone = switch (bale.status) {
+      'cut' => BadgeTone.success,
+      'returned' => BadgeTone.danger,
+      'cutting_in_progress' => BadgeTone.warning,
+      _ => BadgeTone.neutral,
     };
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('${bale.code} · ${bale.supplierName}', style: const TextStyle(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${bale.itemName} · ${bale.metresReceived} ${bale.uom} · ${bale.billEntryDate}'
-                      '${bale.thaanCount > 0 ? ' · ${bale.thaanCount} Thaan${bale.thaanCount == 1 ? '' : 's'} so far' : ''}',
-                      style: TextStyle(fontSize: 12, color: p.textSecondary),
-                    ),
-                  ],
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(bale.status.replaceAll('_', ' '), style: TextStyle(fontSize: 12, color: statusColor, fontWeight: FontWeight.w600)),
-                  if (onTap != null) Icon(Icons.chevron_right, size: 18, color: p.textMuted),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+    return AppListRow(
+      title: '${bale.code} · ${bale.supplierName}',
+      subtitle: '${bale.itemName} · ${bale.metresReceived} ${bale.uom} · ${bale.billEntryDate}'
+          '${bale.thaanCount > 0 ? ' · ${bale.thaanCount} Thaan${bale.thaanCount == 1 ? '' : 's'} so far' : ''}',
+      trailing: StatusBadge(bale.status.replaceAll('_', ' '), tone: tone),
+      chevron: onTap != null,
+      onTap: onTap,
     );
   }
 }
@@ -199,6 +156,9 @@ class _BaleRow extends StatelessWidget {
 /// decision doc's "Re-revised" note): record some, keep the sheet open,
 /// record more, and only close it out with "Mark cutting complete" once
 /// nothing more will be cut from this bale.
+///
+/// Rendered inside [showAppSheet], which supplies the grabber, the bale's
+/// title line and the keyboard inset — this is only the sheet's content.
 class _RecordThaansSheet extends ConsumerStatefulWidget {
   const _RecordThaansSheet({required this.bale});
   final CoreBale bale;
@@ -293,22 +253,15 @@ class _RecordThaansSheetState extends ConsumerState<_RecordThaansSheet> {
   Future<void> _generateQr() async {
     final remaining = _bale.thaanCount - _bale.qrGeneratedCount;
     final already = _bale.qrGeneratedCount;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text('Generate QR codes for ${_bale.code}?'),
-        content: Text(
-          "Assigns a permanent code to the $remaining Thaan${remaining == 1 ? '' : 's'} still waiting on one"
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Generate QR codes for ${_bale.code}?',
+      message: "Assigns a permanent code to the $remaining Thaan${remaining == 1 ? '' : 's'} still waiting on one"
           '${already > 0 ? ' — the $already already coded ${already == 1 ? 'stays' : 'stay'} untouched' : ''}. '
           "This can't be undone — a code, once generated, is fixed.",
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Generate')),
-        ],
-      ),
+      confirmLabel: 'Generate',
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
 
     setState(() => _generatingQr = true);
     try {
@@ -343,101 +296,78 @@ class _RecordThaansSheetState extends ConsumerState<_RecordThaansSheet> {
     final p = context.p;
     final busy = _recording || _completing || _generatingQr;
     final qrRemaining = _bale.thaanCount - _bale.qrGeneratedCount;
+    final hintStyle = TextStyle(fontSize: 12, color: p.textMuted);
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('${_bale.code} · ${_bale.supplierName}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-          const SizedBox(height: 2),
-          Text('${_bale.itemName} · ${_bale.metresReceived} ${_bale.uom}', style: TextStyle(fontSize: 13, color: p.textSecondary)),
-          const SizedBox(height: 12),
-          Text(
-            _bale.thaanCount > 0
-                ? '${_bale.thaanCount} Thaan${_bale.thaanCount == 1 ? '' : 's'} recorded so far.'
-                : 'No Thaans recorded yet.',
-            style: TextStyle(fontSize: 13, color: p.textSecondary),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _count,
-            autofocus: true,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: const InputDecoration(
-              labelText: 'Thaans just cut',
-              helperText: 'The whole bale, or only part of it — recording again later adds more.',
-            ),
-          ),
-          const SizedBox(height: 14),
-          FilledButton.icon(
-            onPressed: busy ? null : _record,
-            icon: _recording
-                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Icon(Icons.add),
-            label: Text(_recording ? 'Recording…' : 'Record'),
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: busy || _bale.thaanCount == 0 ? null : _complete,
-            icon: _completing
-                ? SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: p.accent))
-                : const Icon(Icons.check_circle_outline),
-            label: Text(_completing ? 'Completing…' : 'Mark cutting complete'),
-            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-          ),
-          if (_bale.thaanCount == 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                'Record at least one Thaan before this bale can be marked cut.',
-                style: TextStyle(fontSize: 12, color: p.textMuted),
-              ),
-            ),
-          const Divider(height: 28),
-          OutlinedButton.icon(
-            onPressed: busy || qrRemaining <= 0 ? null : _generateQr,
-            icon: _generatingQr
-                ? SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: p.accent))
-                : const Icon(Icons.qr_code_2),
-            label: Text(_generatingQr ? 'Generating…' : 'Generate QR codes'),
-            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-          ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InlineNotice(
+          _bale.thaanCount > 0
+              ? '${_bale.thaanCount} Thaan${_bale.thaanCount == 1 ? '' : 's'} recorded so far.'
+              : 'No Thaans recorded yet.',
+          icon: Icons.content_cut,
+        ),
+        const SizedBox(height: 14),
+        AppTextField(
+          label: 'Thaans just cut',
+          controller: _count,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          helper: 'The whole bale, or only part of it — recording again later adds more.',
+        ),
+        const SizedBox(height: 14),
+        AppButton.primary(
+          label: 'Record',
+          icon: Icons.add,
+          busy: _recording,
+          onPressed: busy ? null : _record,
+        ),
+        const SizedBox(height: 10),
+        AppButton.secondary(
+          label: 'Mark cutting complete',
+          icon: Icons.check_circle_outline,
+          busy: _completing,
+          onPressed: busy || _bale.thaanCount == 0 ? null : _complete,
+        ),
+        if (_bale.thaanCount == 0)
           Padding(
             padding: const EdgeInsets.only(top: 6),
-            child: Text(
-              _bale.thaanCount == 0
-                  ? "This bale hasn't been cut yet."
-                  : qrRemaining <= 0
-                      ? 'Every Thaan from this bale already has a code.'
-                      : '$qrRemaining Thaan${qrRemaining == 1 ? '' : 's'} still waiting on a code.',
-              style: TextStyle(fontSize: 12, color: p.textMuted),
-            ),
+            child: Text('Record at least one Thaan before this bale can be marked cut.', style: hintStyle),
           ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: busy || _bale.qrGeneratedCount == 0
-                ? null
-                : () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => ThaanLabelsScreen(baleId: _bale.id)),
-                    ),
-            icon: const Icon(Icons.print_outlined),
-            label: const Text('Print QR codes'),
-            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+        const SectionHeader('QR codes', top: 20),
+        InlineNotice(
+          _bale.thaanCount == 0
+              ? "This bale hasn't been cut yet."
+              : qrRemaining <= 0
+                  ? 'Every Thaan from this bale already has a code.'
+                  : '$qrRemaining Thaan${qrRemaining == 1 ? '' : 's'} still waiting on a code.',
+          icon: Icons.qr_code_2,
+        ),
+        const SizedBox(height: 10),
+        AppButton.secondary(
+          label: 'Generate QR codes',
+          icon: Icons.qr_code_2,
+          busy: _generatingQr,
+          onPressed: busy || qrRemaining <= 0 ? null : _generateQr,
+        ),
+        const SizedBox(height: 10),
+        AppButton.secondary(
+          label: 'Print QR codes',
+          icon: Icons.print_outlined,
+          onPressed: busy || _bale.qrGeneratedCount == 0
+              ? null
+              : () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => ThaanLabelsScreen(baleId: _bale.id)),
+                  ),
+        ),
+        if (_bale.qrGeneratedCount == 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text('No Thaans here have a QR code yet.', style: hintStyle),
           ),
-          if (_bale.qrGeneratedCount == 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                'No Thaans here have a QR code yet.',
-                style: TextStyle(fontSize: 12, color: p.textMuted),
-              ),
-            ),
-        ],
-      ),
+      ],
     );
   }
 }

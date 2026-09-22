@@ -5,7 +5,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/api_client.dart';
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
+import '../../widgets/ui/ui.dart';
 import '../pieces/piece_labels_pdf.dart';
 import '../pos/barcode_scan_screen.dart';
 import 'core_auth.dart';
@@ -131,92 +131,94 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
   Widget build(BuildContext context) {
     final p = context.p;
 
-    return Scaffold(
-      backgroundColor: p.surface1,
-      appBar: AppBar(title: const Text('Stock Records')),
-      body: ListView(
-        // The field keeps focus on purpose (a scanner types into it), so a
-        // tap on it re-opens the keypad over the results with nothing to
-        // close it. Scrolling the results is the natural next move — that
-        // now puts the keypad away.
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _field,
-                  focusNode: _focus,
-                  autofocus: true,
-                  keyboardType: TextInputType.number,
-                  textInputAction: TextInputAction.search,
-                  // Guarded like the arrow: a scanner's Enter arriving while
-                  // a lookup is in flight would start a second one and show
-                  // whichever answered last under the other's heading.
-                  onSubmitted: (v) {
-                    if (!_busy) _lookup(v);
-                  },
-                  decoration: InputDecoration(
-                    labelText: 'Item or product code',
-                    hintText: '500066 or 300032',
-                    border: const OutlineInputBorder(),
-                    isDense: true,
+    return AppPage(
+      title: 'Stock Records',
+      padded: false,
+      // The page frame drops focus on any tap in its body, which is right
+      // for every other screen and wrong for this one: the field keeps focus
+      // on purpose so a Bluetooth scanner's keystrokes land in it, and a
+      // stray tap on empty space must not take that away. An inner tap
+      // handler wins the gesture and does nothing, so focus stays put.
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {},
+        child: ListView(
+          // The field keeps focus on purpose (a scanner types into it), so a
+          // tap on it re-opens the keypad over the results with nothing to
+          // close it. Scrolling the results is the natural next move — that
+          // now puts the keypad away.
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: AppTextField(
+                    label: 'Item or product code',
+                    hint: '500066 or 300032',
+                    controller: _field,
+                    focusNode: _focus,
+                    autofocus: true,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.search,
+                    // Guarded like the arrow: a scanner's Enter arriving while
+                    // a lookup is in flight would start a second one and show
+                    // whichever answered last under the other's heading.
+                    onSubmitted: (v) {
+                      if (!_busy) _lookup(v);
+                    },
                     // iOS's numeric keypad has no return/search key, so typing
                     // a code by hand has no way to submit without this — the
                     // Bluetooth scanner's Enter keystroke reaches onSubmitted
                     // regardless of what the on-screen keyboard shows.
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.arrow_forward),
+                    suffix: AppIconButton(
+                      icon: Icons.arrow_forward,
                       tooltip: 'Search',
                       onPressed: _busy ? null : () => _lookup(_field.text),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              SizedBox(
-                height: 48,
-                child: FilledButton.icon(
+                const SizedBox(width: 10),
+                AppButton.primary(
+                  label: 'Scan',
+                  icon: Icons.qr_code_scanner,
+                  expand: false,
                   onPressed: _busy ? null : _scan,
-                  icon: const Icon(Icons.qr_code_scanner, size: 20),
-                  label: const Text('Scan'),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Scan the label on a saree, or the one on the box it arrived in.',
-            style: TextStyle(fontSize: 12, color: p.textMuted),
-          ),
-          const SizedBox(height: 20),
-
-          if (_busy)
-            const Padding(
-              padding: EdgeInsets.only(top: 40),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (_problem != null)
-            _Problem(code: _asked ?? '', message: _problem!)
-          else if (_found != null) ...[
-            _Summary(code: _asked ?? '', pieces: _found!),
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: () => _printLabels(_found!),
-                icon: const Icon(Icons.qr_code_2, size: 18),
-                label: Text(
-                  _found!.length > 1 ? 'Print labels' : 'Print label',
-                ),
-              ),
+              ],
             ),
-            const SizedBox(height: 2),
-            for (final piece in _found!) _PieceCard(piece: piece),
-          ] else
-            const _Idle(),
-        ],
+            const SizedBox(height: 8),
+            Text(
+              'Scan the label on a saree, or the one on the box it arrived in.',
+              style: TextStyle(fontSize: 12, color: p.textMuted),
+            ),
+            const SizedBox(height: 20),
+
+            if (_busy)
+              Padding(
+                padding: const EdgeInsets.only(top: 40),
+                child: LoadingState(message: 'Looking up ${_asked ?? ''}…'),
+              )
+            else if (_problem != null)
+              _Problem(code: _asked ?? '', message: _problem!)
+            else if (_found != null) ...[
+              _Summary(code: _asked ?? '', pieces: _found!),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: AppButton.ghost(
+                  label: _found!.length > 1 ? 'Print labels' : 'Print label',
+                  icon: Icons.qr_code_2,
+                  onPressed: () => _printLabels(_found!),
+                ),
+              ),
+              const SizedBox(height: 2),
+              for (final piece in _found!) _PieceCard(piece: piece),
+            ] else
+              const _Idle(),
+          ],
+        ),
       ),
     );
   }
@@ -227,19 +229,11 @@ class _Idle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 60),
-      child: Column(
-        children: [
-          Icon(Icons.qr_code_2, size: 44, color: p.textMuted),
-          const SizedBox(height: 12),
-          Text(
-            'Nothing scanned yet.',
-            style: TextStyle(color: p.textSecondary),
-          ),
-        ],
+    return const Padding(
+      padding: EdgeInsets.only(top: 32),
+      child: EmptyState(
+        icon: Icons.qr_code_2,
+        title: 'Nothing scanned yet.',
       ),
     );
   }
@@ -253,39 +247,13 @@ class _Problem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: p.danger.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: p.danger.withValues(alpha: 0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            message,
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 14,
-              color: p.danger,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            // What was actually read, because a scanner that has picked up a
-            // stray character produces exactly this and no other clue.
-            'Read: $code',
-            style: TextStyle(
-              fontSize: 12.5,
-              color: p.danger,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-        ],
-      ),
+    // What was actually read goes under the server's answer, because a
+    // scanner that has picked up a stray character produces exactly this and
+    // no other clue.
+    return InlineNotice(
+      '$message\nRead: $code',
+      icon: Icons.error_outline,
+      warning: true,
     );
   }
 }
@@ -303,13 +271,9 @@ class _Summary extends StatelessWidget {
     final held = pieces.where((piece) => piece.isHeld).length;
     final consignment = pieces.length > 1;
 
-    return Container(
+    return AppCard(
+      emphasis: true,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: p.border),
-      ),
       child: Row(
         children: [
           Icon(
@@ -358,161 +322,101 @@ class _PieceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: p.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // The same QR the printed label carries — the bare item code,
-              // which is what a scan of either resolves. On screen so a
-              // piece can be identified or handed on without a label
-              // printed, and another phone can scan it straight off this
-              // one. White behind it with room around: a QR needs its quiet
-              // zone, and the card is not white.
-              Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: p.border),
-                ),
-                child: QrImageView(
-                  data: piece.itemCode,
-                  size: 64,
-                  padding: EdgeInsets.zero,
-                  backgroundColor: Colors.white,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      piece.itemCode,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 16,
-                        color: p.text,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      piece.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 13, color: p.textSecondary),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              /*
-                Held or gone, said first and said loudly.
-
-                It is the first thing a scan should answer. The ledger decides
-                it — sold, written off or sent on all make it false — and a
-                saree that reads "Warehouse" when it left six weeks ago is the
-                bug this screen exists to not have.
-              */
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: (piece.isHeld ? p.success : p.danger)
-                      .withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  piece.isHeld ? 'In stock' : 'Gone',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
-                    color: piece.isHeld ? p.success : p.danger,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: AppCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // The same QR the printed label carries — the bare item code,
+                // which is what a scan of either resolves. On screen so a
+                // piece can be identified or handed on without a label
+                // printed, and another phone can scan it straight off this
+                // one. White behind it with room around: a QR needs its quiet
+                // zone to be read, whatever the theme, and the card is not
+                // white.
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: p.border),
+                  ),
+                  child: QrImageView(
+                    data: piece.itemCode,
+                    size: 64,
+                    padding: EdgeInsets.zero,
+                    backgroundColor: Colors.white,
                   ),
                 ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        piece.itemCode,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                          color: p.text,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        piece.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13, color: p.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                /*
+                  Held or gone, said first and said loudly.
+
+                  It is the first thing a scan should answer. The ledger decides
+                  it — sold, written off or sent on all make it false — and a
+                  saree that reads "Warehouse" when it left six weeks ago is the
+                  bug this screen exists to not have.
+                */
+                piece.isHeld
+                    ? const StatusBadge('In stock', tone: BadgeTone.success)
+                    : const StatusBadge('Gone', tone: BadgeTone.danger),
+              ],
+            ),
+            const SizedBox(height: 12),
+            KeyValueRow(
+              'Where',
+              // Null once it has left us, which is not the same as unknown.
+              piece.location ?? 'No longer with us',
+              strong: piece.isHeld,
+            ),
+            KeyValueRow('Price', piece.price),
+            if (piece.colour != null) KeyValueRow('Colour', piece.colour!),
+            if (piece.productType != null)
+              KeyValueRow('Type', piece.productType!),
+            // Consignment before design, and that ordering is the point: the
+            // product code is what the paperwork says, the design code is
+            // internal and repeats. Kept only because a scan is also how
+            // somebody finds their way back to the record.
+            if (piece.productCode != null)
+              KeyValueRow('Consignment', piece.productCode!, mono: true),
+            KeyValueRow('Design', piece.designCode, mono: true),
+            if (piece.receivedAt != null)
+              KeyValueRow(
+                'Received',
+                piece.reference == null
+                    ? piece.receivedAt!
+                    : '${piece.receivedAt!} · ${piece.reference!}',
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _Fact(
-            label: 'Where',
-            // Null once it has left us, which is not the same as unknown.
-            value: piece.location ?? 'No longer with us',
-            emphasise: piece.isHeld,
-          ),
-          _Fact(label: 'Price', value: piece.price),
-          if (piece.colour != null) _Fact(label: 'Colour', value: piece.colour!),
-          if (piece.productType != null)
-            _Fact(label: 'Type', value: piece.productType!),
-          // Consignment before design, and that ordering is the point: the
-          // product code is what the paperwork says, the design code is
-          // internal and repeats. Kept only because a scan is also how
-          // somebody finds their way back to the record.
-          if (piece.productCode != null)
-            _Fact(label: 'Consignment', value: piece.productCode!),
-          _Fact(label: 'Design', value: piece.designCode),
-          if (piece.receivedAt != null)
-            _Fact(
-              label: 'Received',
-              value: piece.reference == null
-                  ? piece.receivedAt!
-                  : '${piece.receivedAt!} · ${piece.reference!}',
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Fact extends StatelessWidget {
-  const _Fact({
-    required this.label,
-    required this.value,
-    this.emphasise = false,
-  });
-
-  final String label;
-  final String value;
-  final bool emphasise;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.p;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 5),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 96,
-            child: Text(
-              label,
-              style: TextStyle(fontSize: 12.5, color: p.textMuted),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                fontSize: 13,
-                color: emphasise ? p.text : p.textSecondary,
-                fontWeight: emphasise ? FontWeight.w600 : FontWeight.w400,
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

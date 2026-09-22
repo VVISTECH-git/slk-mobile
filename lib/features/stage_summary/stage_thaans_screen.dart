@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
+import '../../widgets/ui/ui.dart';
 import 'stage_summary_providers.dart';
 
 /// One bucket's Thaans, grouped by vendor and bale rather than one row per
@@ -35,11 +34,11 @@ class _StageThaansScreenState extends ConsumerState<StageThaansScreen> {
   Widget build(BuildContext context) {
     final key = (bucket: widget.bucket, baleType: widget.baleType);
     final groups = ref.watch(stageGroupsProvider(key));
-    final p = context.p;
     final q = _query.text.trim().toLowerCase();
 
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.baleType != null ? '${widget.bucket} · ${widget.baleType}' : widget.bucket)),
+    return AppPage(
+      title: widget.baleType != null ? '${widget.bucket} · ${widget.baleType}' : widget.bucket,
+      padded: false,
       body: AsyncView(
         value: groups,
         onRetry: () => ref.invalidate(stageGroupsProvider(key)),
@@ -60,27 +59,26 @@ class _StageThaansScreenState extends ConsumerState<StageThaansScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      '$total Thaan${total == 1 ? "" : "s"} across ${rows.length} bale/vendor group${rows.length == 1 ? "" : "s"}.',
-                      style: TextStyle(color: p.textSecondary, fontSize: 12),
+                    StatTile(
+                      value: '$total',
+                      label: 'Thaan${total == 1 ? "" : "s"} across ${rows.length} bale/vendor group${rows.length == 1 ? "" : "s"}.',
+                      tone: BadgeTone.brand,
                     ),
-                    const SizedBox(height: 8),
-                    TextField(
+                    const SizedBox(height: 12),
+                    AppTextField(
+                      label: 'Search',
                       controller: _query,
+                      hint: 'Search bale or vendor…',
+                      suffix: const Icon(Icons.search, size: 20),
+                      textInputAction: TextInputAction.search,
                       onChanged: (_) => setState(() {}),
-                      decoration: InputDecoration(
-                        hintText: 'Search bale or vendor…',
-                        prefixIcon: const Icon(Icons.search, size: 20),
-                        isDense: true,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
                     ),
                   ],
                 ),
               ),
               Expanded(
                 child: filtered.isEmpty
-                    ? Center(child: Text('No match for "${_query.text}".', style: TextStyle(color: p.textSecondary)))
+                    ? EmptyState(title: 'No match for "${_query.text}".', icon: Icons.search_off, compact: true)
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                         itemCount: filtered.length,
@@ -105,43 +103,33 @@ class _GroupRow extends StatelessWidget {
     final p = context.p;
     final stale = (group.daysWaiting ?? 0) >= 14;
 
-    return Container(
+    return AppCard(
+      tone: stale ? p.danger.withValues(alpha: 0.06) : null,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: stale ? p.danger.withValues(alpha: 0.5) : p.border),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Bale ${group.baleCode}',
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
-                ),
-                if (group.vendorName != null) ...[
-                  const SizedBox(height: 2),
-                  Text(group.vendorName!, style: TextStyle(color: p.primary, fontWeight: FontWeight.w600, fontSize: 12)),
-                ],
-                if (group.daysWaiting != null) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    '${group.daysWaiting} day${group.daysWaiting == 1 ? "" : "s"} (since ${group.since})',
-                    style: TextStyle(
-                      color: stale ? p.danger : p.textSecondary,
-                      fontWeight: stale ? FontWeight.w700 : FontWeight.w400,
-                      fontSize: 11.5,
-                    ),
-                  ),
-                ],
-              ],
+          CardTitle(
+            'Bale ${group.baleCode}',
+            subtitle: group.vendorName,
+            trailing: Text(
+              '${group.count}',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
+                color: p.text,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
             ),
           ),
-          Text('${group.count}', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: p.text)),
+          if (group.daysWaiting != null) ...[
+            const SizedBox(height: 6),
+            StatusBadge(
+              '${group.daysWaiting} day${group.daysWaiting == 1 ? "" : "s"} (since ${group.since})',
+              tone: stale ? BadgeTone.danger : BadgeTone.neutral,
+              icon: Icons.schedule,
+            ),
+          ],
         ],
       ),
     );

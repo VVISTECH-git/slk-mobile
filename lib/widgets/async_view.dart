@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../theme/app_theme.dart';
 import 'skeleton.dart';
+import 'ui/states.dart';
 
 /// Renders an [AsyncValue] with consistent loading / error / empty states so
 /// every screen behaves the same. [onRetry] re-runs the underlying provider.
@@ -28,62 +29,13 @@ class AsyncView<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     return value.when(
       loading: () => loading ?? const SkeletonList(),
-      error: (err, _) => _ErrorState(message: '$err', onRetry: onRetry),
+      error: (err, _) => ErrorState(message: '$err', onRetry: onRetry),
       data: (d) {
         if (isEmpty != null && isEmpty!(d)) {
-          return _EmptyState(message: emptyMessage);
+          return EmptyState(title: emptyMessage);
         }
         return data(d);
       },
-    );
-  }
-}
-
-class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.message, this.onRetry});
-  final String message;
-  final VoidCallback? onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.cloud_off, size: 44, color: context.p.textSecondary),
-            const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center, style: TextStyle(color: context.p.textSecondary)),
-            if (onRetry != null) ...[
-              const SizedBox(height: 16),
-              FilledButton.tonal(onPressed: onRetry, child: const Text('Try again')),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.message});
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.inbox_outlined, size: 44, color: context.p.textSecondary),
-            const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center, style: TextStyle(color: context.p.textSecondary)),
-          ],
-        ),
-      ),
     );
   }
 }

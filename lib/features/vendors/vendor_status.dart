@@ -1,23 +1,20 @@
-import 'package:flutter/material.dart';
+import '../../widgets/ui/ui.dart';
 
-import '../../theme/app_theme.dart';
+/// Tone and label for `CoreVendorLedgerEntry.status` and
+/// `CoreDamagedThaan.status`. The badge itself is the library's
+/// [StatusBadge]; these only say what each server status *means*
+/// ([BadgeTone]) so the palette decides the colour in every theme.
 
-/// Colour and label for `CoreVendorLedgerEntry.status` and
-/// `CoreDamagedThaan.status` — the phone has no separate "warn" token in
-/// its palette (see `theme/app_theme.dart`'s `AppPalette`), so these reuse
-/// `primary`/`danger`/`success`/`textMuted` rather than inventing a new one.
-
-Color vendorTxnStatusColor(BuildContext context, String? status) {
-  final p = context.p;
+BadgeTone vendorTxnStatusTone(String? status) {
   switch (status) {
     case 'needs_pricing':
-      return p.danger;
+      return BadgeTone.danger;
     case 'approved':
-      return p.primary;
+      return BadgeTone.brand;
     case 'paid':
-      return p.success;
+      return BadgeTone.success;
     default:
-      return p.textMuted;
+      return BadgeTone.neutral;
   }
 }
 
@@ -34,15 +31,14 @@ String vendorTxnStatusLabel(String? status) {
   }
 }
 
-Color damagedStatusColor(BuildContext context, String status) {
-  final p = context.p;
+BadgeTone damagedStatusTone(String status) {
   switch (status) {
     case 'flagged':
-      return p.danger;
+      return BadgeTone.danger;
     case 'addressed':
-      return p.primary;
+      return BadgeTone.brand;
     default:
-      return p.textMuted;
+      return BadgeTone.neutral;
   }
 }
 
@@ -57,20 +53,10 @@ String damagedStatusLabel(String status) {
   }
 }
 
-class StatusChip extends StatelessWidget {
-  const StatusChip({super.key, required this.label, required this.color});
-  final String label;
-  final Color color;
+/// The badge for a ledger transaction's status.
+StatusBadge vendorTxnStatusBadge(String? status) =>
+    StatusBadge(vendorTxnStatusLabel(status), tone: vendorTxnStatusTone(status));
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
-      child: Text(
-        label,
-        style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 11),
-      ),
-    );
-  }
-}
+/// The badge for a damaged Thaan's status.
+StatusBadge damagedStatusBadge(String status) =>
+    StatusBadge(damagedStatusLabel(status), tone: damagedStatusTone(status));

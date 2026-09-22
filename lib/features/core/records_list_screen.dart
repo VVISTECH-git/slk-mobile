@@ -4,8 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/api_client.dart';
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
+import '../../widgets/ui/ui.dart';
 import '../pos/barcode_scan_screen.dart';
 import 'core_auth.dart';
 
@@ -169,62 +168,62 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
     final records = ref.watch(coreRecordsProvider);
     final p = context.p;
 
-    return Scaffold(
-      backgroundColor: p.surface1,
-      appBar: AppBar(
-        title: const Text('Products List'),
-        actions: [
-          _resolving
-              ? const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              : IconButton(
-                  tooltip: 'Scan an SLK label',
-                  icon: const Icon(Icons.qr_code_scanner),
-                  onPressed: _scan,
-                ),
-          IconButton(
-            tooltip: 'New record',
-            icon: const Icon(Icons.add),
-            // Refetched on the way back — see _Row for why autoDispose alone
-            // never does this here. Filing a record and then not finding it
-            // in the list you filed it from was the whole bug.
-            onPressed: () async {
-              await context.push('/core/records/new');
-              if (mounted) ref.invalidate(coreRecordsProvider);
-            },
+    return AppPage(
+      title: 'Products List',
+      padded: false,
+      actions: [
+        if (_resolving)
+          // A scan or a typed code is being looked up — said in the place
+          // the scan button was, small enough to live in an app bar.
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: SizedBox(
+              height: 20,
+              width: 20,
+              child: CircularProgressIndicator(strokeWidth: 2, color: p.onAppBar),
+            ),
+          )
+        else
+          AppIconButton(
+            icon: Icons.qr_code_scanner,
+            tooltip: 'Scan an SLK label',
+            color: p.onAppBar,
+            onPressed: _scan,
           ),
-        ],
-      ),
+        AppIconButton(
+          icon: Icons.add,
+          tooltip: 'New record',
+          color: p.onAppBar,
+          // Refetched on the way back — see _Row for why autoDispose alone
+          // never does this here. Filing a record and then not finding it
+          // in the list you filed it from was the whole bug.
+          onPressed: () async {
+            await context.push('/core/records/new');
+            if (mounted) ref.invalidate(coreRecordsProvider);
+          },
+        ),
+      ],
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: TextField(
+            child: AppTextField(
+              label: 'Search',
+              hint: 'Code, name, colour, consignment…',
               controller: _search,
               onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _lookUpTyped(),
-              decoration: InputDecoration(
-                hintText: 'Code, name, colour, consignment…',
-                prefixIcon: const Icon(Icons.search),
-                border: const OutlineInputBorder(),
-                isDense: true,
-                suffixIcon: _query.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () => setState(() {
-                          _search.clear();
-                          _query = '';
-                        }),
-                      ),
-              ),
+              suffix: _query.isEmpty
+                  ? const Icon(Icons.search)
+                  : AppIconButton(
+                      icon: Icons.clear,
+                      tooltip: 'Clear the search',
+                      onPressed: () => setState(() {
+                        _search.clear();
+                        _query = '';
+                      }),
+                    ),
             ),
           ),
           Expanded(
@@ -244,62 +243,43 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
                 final shown = _query.isEmpty
                     ? rows
                     : [for (final r in rows) if (r.haystack.contains(_query)) r];
+                final typed = _search.text.trim();
 
                 return RefreshIndicator(
                   onRefresh: () async => ref.invalidate(coreRecordsProvider),
-                  child: ListView.builder(
+                  child: ListView(
                     // Pullable even with nothing in it, which is exactly when
                     // somebody most wants to try again.
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                    itemCount: shown.isEmpty ? 1 : shown.length + 1,
-                    itemBuilder: (context, i) {
-                      if (shown.isEmpty) {
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 80),
-                          child: Column(
-                            children: [
-                              Icon(Icons.inbox_outlined,
-                                  size: 40, color: p.textMuted),
-                              const SizedBox(height: 12),
-                              Text(
-                                rows.isEmpty
-                                    ? 'The catalogue is empty.'
-                                    : 'Nothing matches “${_search.text.trim()}”.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: p.textSecondary),
-                              ),
-                              if (rows.isEmpty) ...[
-                                const SizedBox(height: 6),
-                                Text(
-                                  'Pull down to check again.',
-                                  style: TextStyle(
-                                      fontSize: 12, color: p.textMuted),
-                                ),
-                              ],
-                              // A label's number, not a word — the filter
-                              // was never going to find it. Offer the
-                              // lookup a scan would have done.
-                              if (rows.isNotEmpty &&
-                                  looksLikeLabelCode(_search.text.trim())) ...[
-                                const SizedBox(height: 14),
-                                FilledButton.tonalIcon(
-                                  onPressed: _resolving
+                    children: [
+                      if (shown.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 40),
+                          child: rows.isEmpty
+                              ? const EmptyState(
+                                  title: 'The catalogue is empty.',
+                                  message: 'Pull down to check again.',
+                                )
+                              : EmptyState(
+                                  icon: Icons.search_off,
+                                  title: 'Nothing matches “$typed”.',
+                                  // A label's number, not a word — the filter
+                                  // was never going to find it. Offer the
+                                  // lookup a scan would have done.
+                                  actionLabel: looksLikeLabelCode(typed)
+                                      ? 'Look up $typed as a label code'
+                                      : null,
+                                  onAction: _resolving
                                       ? null
-                                      : () => _resolveCode(_search.text.trim()),
-                                  icon: const Icon(Icons.qr_code_2, size: 18),
-                                  label: Text(
-                                    'Look up ${_search.text.trim()} as a label code',
-                                  ),
+                                      : () => _resolveCode(typed),
                                 ),
-                              ],
-                            ],
-                          ),
-                        );
-                      }
-
-                      if (i == shown.length) {
-                        return Padding(
+                        )
+                      else ...[
+                        AppListGroup(
+                          children: [for (final r in shown) _Row(record: r)],
+                        ),
+                        Padding(
                           padding: const EdgeInsets.only(top: 14),
                           child: Text(
                             // "1 records" is the kind of thing that makes a
@@ -310,11 +290,9 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
                             textAlign: TextAlign.center,
                             style: TextStyle(fontSize: 12, color: p.textMuted),
                           ),
-                        );
-                      }
-
-                      return _Row(record: shown[i]);
-                    },
+                        ),
+                      ],
+                    ],
                   ),
                 );
               },
@@ -335,163 +313,89 @@ class _Row extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final p = context.p;
     final swatch = record.swatch;
+    final syncIcon = _syncIcon(record.syncStatus);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: p.border),
+    /*
+      The product code leads, not the design code.
+
+      The design code — SAR-GEN-COT-0001 — describes what somebody entered
+      and repeats; the schema calls it internal, and two people filing the
+      same saree will write different ones. The product code is the
+      consignment: what arrived, on a day, against an invoice, and what the
+      floor reads off the paperwork in its hands. No consignment yet is said
+      rather than left blank.
+    */
+    final subtitle = [
+      record.productCode ?? 'No consignment yet',
+      if (record.colour != null) record.colour!,
+    ].join('  ·  ');
+
+    return AppListRow(
+      title: record.name,
+      subtitle: subtitle,
+      // The colour, as a colour. On a hand-painted saree it is the first
+      // thing anyone says about the piece.
+      leading: RowThumb(
+        color: swatch,
+        icon: swatch == null ? Icons.help_outline : null,
       ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        // The record, whole — every field the create form asks, seeded and
-        // open to correction. Photographs are one tap from there, not
-        // the destination in themselves.
-        //
-        // Refetched on the way back. The provider is autoDispose, but that
-        // only fires once nothing is listening — and this list goes on
-        // listening underneath the pushed screen, so a price or count saved
-        // there came back to a row still showing the old one. Pull-to-refresh
-        // was the only way out, and nobody knew to.
-        onTap: () async {
-          await context.push('/core/records/${record.id}');
-          if (context.mounted) ref.invalidate(coreRecordsProvider);
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
+      trailing: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // The colour, as a colour. On a hand-painted saree it is the
-              // first thing anyone says about the piece.
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: swatch ?? p.surface3,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: p.border),
+              // Nothing drawn for "none" — a record with no consignment
+              // yet, or one nobody has tried to publish, has nothing here
+              // worth a person's attention.
+              if (syncIcon != null) ...[
+                Icon(syncIcon, size: 13, color: _syncColor(record.syncStatus, p)),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                record.price,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  color: p.text,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
-                child: swatch == null
-                    ? Icon(Icons.help_outline, size: 18, color: p.textMuted)
-                    : null,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      record.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    /*
-                      The product code leads, not the design code.
-
-                      The design code — SAR-GEN-COT-0001 — describes what
-                      somebody entered and repeats; the schema calls it
-                      internal, and two people filing the same saree will
-                      write different ones. The product code is the
-                      consignment: what arrived, on a day, against an invoice,
-                      and what the floor reads off the paperwork in its hands.
-                    */
-                    Row(
-                      children: [
-                        if (record.productCode != null) ...[
-                          Text(
-                            record.productCode!,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: p.primary,
-                              fontFeatures: const [FontFeature.tabularFigures()],
-                            ),
-                          ),
-                          if (record.colour != null)
-                            Text('  ·  ',
-                                style: TextStyle(
-                                    fontSize: 12, color: p.textMuted)),
-                        ] else
-                          Text(
-                            // No consignment has arrived against this record
-                            // yet, so there is no product code to show. Said
-                            // rather than left blank.
-                            'No consignment yet  ·  ',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: p.textMuted,
-                                fontStyle: FontStyle.italic),
-                          ),
-                        Flexible(
-                          child: Text(
-                            record.colour ?? '',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style:
-                                TextStyle(fontSize: 12, color: p.textSecondary),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Nothing drawn for "none" — a record with no
-                      // consignment yet, or one nobody has tried to publish,
-                      // has nothing here worth a person's attention.
-                      if (_syncIcon(record.syncStatus) != null) ...[
-                        Icon(
-                          _syncIcon(record.syncStatus),
-                          size: 13,
-                          color: _syncColor(record.syncStatus, p),
-                        ),
-                        const SizedBox(width: 4),
-                      ],
-                      Text(
-                        record.price,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    // "6 Piece" reads oddly; "6 in stock" is what is meant, and
-                    // the unit only earns its place where it is not the Piece.
-                    // Sold trails on only once there is one to report — a
-                    // record that has never sold says nothing extra.
-                    [
-                      record.uom == null || record.uom == 'Piece'
-                          ? '${record.quantity} in stock'
-                          : '${record.quantity} ${record.uom}',
-                      if (record.sold > 0) '${record.sold} sold',
-                    ].join(' · '),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: record.quantity > 0 ? p.success : p.textMuted,
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 2),
+          Text(
+            // "6 Piece" reads oddly; "6 in stock" is what is meant, and
+            // the unit only earns its place where it is not the Piece.
+            // Sold trails on only once there is one to report — a
+            // record that has never sold says nothing extra.
+            [
+              record.uom == null || record.uom == 'Piece'
+                  ? '${record.quantity} in stock'
+                  : '${record.quantity} ${record.uom}',
+              if (record.sold > 0) '${record.sold} sold',
+            ].join(' · '),
+            style: TextStyle(
+              fontSize: 12,
+              color: record.quantity > 0 ? p.success : p.textMuted,
+            ),
+          ),
+        ],
       ),
+      // The record, whole — every field the create form asks, seeded and
+      // open to correction. Photographs are one tap from there, not
+      // the destination in themselves.
+      //
+      // Refetched on the way back. The provider is autoDispose, but that
+      // only fires once nothing is listening — and this list goes on
+      // listening underneath the pushed screen, so a price or count saved
+      // there came back to a row still showing the old one. Pull-to-refresh
+      // was the only way out, and nobody knew to.
+      onTap: () async {
+        await context.push('/core/records/${record.id}');
+        if (context.mounted) ref.invalidate(coreRecordsProvider);
+      },
     );
   }
 

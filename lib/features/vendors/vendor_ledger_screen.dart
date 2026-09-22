@@ -3,9 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
-import '../../widgets/theme_button.dart';
+import '../../widgets/ui/ui.dart';
 import 'vendor_providers.dart';
 
 /// Every vendor with what's owed and what's been paid — Finance Manager's
@@ -19,10 +17,11 @@ class VendorLedgerScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final vendors = ref.watch(coreVendorsFinanceProvider);
-    final p = context.p;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Vendor Ledger'), actions: const [ThemeButton()]),
+    return AppPage(
+      title: 'Vendor Ledger',
+      actions: const [ThemeButton()],
+      padded: false,
       body: RefreshIndicator(
         onRefresh: () async => ref.invalidate(coreVendorsFinanceProvider),
         child: AsyncView(
@@ -40,21 +39,21 @@ class VendorLedgerScreen extends ConsumerWidget {
               children: [
                 Row(
                   children: [
-                    Expanded(child: _StatCard(label: 'Billed', value: totalBilled, color: p.text)),
+                    Expanded(child: _StatCard(label: 'Billed', value: totalBilled)),
                     const SizedBox(width: 10),
-                    Expanded(child: _StatCard(label: 'Paid', value: totalPaid, color: p.success)),
+                    Expanded(child: _StatCard(label: 'Paid', value: totalPaid, tone: BadgeTone.success)),
                     const SizedBox(width: 10),
                     Expanded(
                       child: _StatCard(
                         label: 'Balance due',
                         value: balanceDue,
-                        color: balanceDue > 0 ? p.danger : p.success,
+                        tone: balanceDue > 0 ? BadgeTone.danger : BadgeTone.success,
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
-                for (final v in rows) _VendorTile(vendor: v),
+                AppListGroup(children: [for (final v in rows) _VendorTile(vendor: v)]),
               ],
             );
           },
@@ -65,31 +64,21 @@ class VendorLedgerScreen extends ConsumerWidget {
 }
 
 class _StatCard extends StatelessWidget {
-  const _StatCard({required this.label, required this.value, required this.color});
+  const _StatCard({required this.label, required this.value, this.tone = BadgeTone.neutral});
   final String label;
   final double value;
-  final Color color;
+  final BadgeTone tone;
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
-    return Container(
+    return AppCard(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: p.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: TextStyle(color: p.textSecondary, fontSize: 11.5, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
-          Text(
-            '₹${value.toStringAsFixed(0)}',
-            style: TextStyle(color: color, fontSize: 17, fontWeight: FontWeight.w800),
-          ),
-        ],
+      // Three abreast on a phone; a six-figure rupee total scales down
+      // rather than clipping.
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: StatTile(value: '₹${value.toStringAsFixed(0)}', label: label, tone: tone),
       ),
     );
   }
@@ -102,30 +91,26 @@ class _VendorTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: ListTile(
-        onTap: () => context.push('/core/vendors/${vendor.id}', extra: vendor.name),
-        title: Text(vendor.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: Text(
-          vendor.stages.isEmpty ? vendor.code : '${vendor.code} · ${vendor.stages.join(", ")}',
-          style: TextStyle(color: p.textSecondary, fontSize: 12.5),
-        ),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              vendor.balanceDue > 0 ? '₹${vendor.balanceDue.toStringAsFixed(0)}' : '—',
-              style: TextStyle(
-                color: vendor.balanceDue > 0 ? p.danger : p.textMuted,
-                fontWeight: FontWeight.w700,
-              ),
+    return AppListRow(
+      onTap: () => context.push('/core/vendors/${vendor.id}', extra: vendor.name),
+      title: vendor.name,
+      subtitle: vendor.stages.isEmpty ? vendor.code : '${vendor.code} · ${vendor.stages.join(", ")}',
+      chevron: true,
+      trailing: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            vendor.balanceDue > 0 ? '₹${vendor.balanceDue.toStringAsFixed(0)}' : '—',
+            style: TextStyle(
+              color: vendor.balanceDue > 0 ? p.danger : p.textMuted,
+              fontWeight: FontWeight.w700,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
-            if (vendor.currentlyHolding > 0)
-              Text('${vendor.currentlyHolding} out', style: TextStyle(color: p.textSecondary, fontSize: 11)),
-          ],
-        ),
+          ),
+          if (vendor.currentlyHolding > 0)
+            Text('${vendor.currentlyHolding} out', style: TextStyle(color: p.textSecondary, fontSize: 11)),
+        ],
       ),
     );
   }

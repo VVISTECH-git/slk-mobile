@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import 'ui/app_text_field.dart';
 
 /// One selectable option. [color] renders a swatch dot (used for colours).
 class PickerOption {
@@ -25,6 +26,8 @@ class PickerField extends StatelessWidget {
     required this.onChanged,
     this.hint,
     this.allowClear = false,
+    this.required = false,
+    this.error,
   });
 
   final String label;
@@ -33,6 +36,12 @@ class PickerField extends StatelessWidget {
   final ValueChanged<String?> onChanged;
   final String? hint;
   final bool allowClear;
+
+  /// Asterisk on the label; validation is the caller's.
+  final bool required;
+
+  /// Shown under the box in red, like [AppTextField.error].
+  final String? error;
 
   @override
   Widget build(BuildContext context) {
@@ -43,7 +52,12 @@ class PickerField extends StatelessWidget {
         break;
       }
     }
-    return InkWell(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FieldLabel(label, required: required),
+        const SizedBox(height: 6),
+        InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: () async {
         final result = await showModalBottomSheet<_PickResult>(
@@ -64,10 +78,10 @@ class PickerField extends StatelessWidget {
       },
       child: InputDecorator(
         decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          floatingLabelBehavior: FloatingLabelBehavior.never,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
           suffixIcon: const Icon(Icons.expand_more),
+          errorText: error,
         ),
         child: Row(
           children: [
@@ -82,6 +96,7 @@ class PickerField extends StatelessWidget {
                 softWrap: true,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
+                  fontSize: 16,
                   color: sel == null ? context.p.textMuted : context.p.text,
                   fontWeight: sel == null ? FontWeight.w400 : FontWeight.w600,
                 ),
@@ -90,6 +105,8 @@ class PickerField extends StatelessWidget {
           ],
         ),
       ),
+        ),
+      ],
     );
   }
 }

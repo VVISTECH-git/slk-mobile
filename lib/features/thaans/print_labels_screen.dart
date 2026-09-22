@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
-import '../../widgets/theme_button.dart';
+import '../../widgets/ui/ui.dart';
 import '../bales/bale_providers.dart';
 import '../bales/thaan_labels_screen.dart';
 
@@ -31,30 +29,30 @@ class _PrintLabelsScreenState extends ConsumerState<PrintLabelsScreen> {
   @override
   Widget build(BuildContext context) {
     final bales = ref.watch(coreBalesProvider);
-    final p = context.p;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Print QR Labels'), actions: [const ThemeButton()]),
+    return AppPage(
+      title: 'Print QR Labels',
+      actions: const [ThemeButton()],
+      padded: false,
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: TextField(
+            child: AppTextField(
+              label: 'Search',
+              hint: 'Search any bale by code',
               controller: _search,
               textCapitalization: TextCapitalization.characters,
-              decoration: InputDecoration(
-                hintText: 'Search any bale by code',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _query.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () => setState(() {
-                          _search.clear();
-                          _query = '';
-                        }),
-                      ),
-              ),
+              suffix: _query.isEmpty
+                  ? null
+                  : AppIconButton(
+                      icon: Icons.clear,
+                      tooltip: 'Clear',
+                      onPressed: () => setState(() {
+                        _search.clear();
+                        _query = '';
+                      }),
+                    ),
               onChanged: (v) => setState(() => _query = v.trim()),
             ),
           ),
@@ -68,33 +66,28 @@ class _PrintLabelsScreenState extends ConsumerState<PrintLabelsScreen> {
                     : rows.where((b) => b.code.toLowerCase().contains(_query.toLowerCase())).toList();
 
                 if (shown.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(
-                        _query.isEmpty ? 'No bale has a QR code generated yet.' : 'No bale matches "$_query".',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: p.textSecondary),
-                      ),
-                    ),
+                  return EmptyState(
+                    icon: Icons.qr_code_2,
+                    title: _query.isEmpty ? 'No bale has a QR code generated yet.' : 'No bale matches "$_query".',
                   );
                 }
 
                 return ListView(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                   children: [
-                    for (final b in shown)
-                      Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: ListTile(
-                          title: Text('${b.code} · ${b.supplierName}', style: const TextStyle(fontWeight: FontWeight.w700)),
-                          subtitle: Text('${b.itemName} · ${b.qrGeneratedCount} of ${b.thaanCount} Thaans coded'),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => ThaanLabelsScreen(baleId: b.id)),
+                    AppListGroup(
+                      children: [
+                        for (final b in shown)
+                          AppListRow(
+                            title: '${b.code} · ${b.supplierName}',
+                            subtitle: '${b.itemName} · ${b.qrGeneratedCount} of ${b.thaanCount} Thaans coded',
+                            chevron: true,
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => ThaanLabelsScreen(baleId: b.id)),
+                            ),
                           ),
-                        ),
-                      ),
+                      ],
+                    ),
                   ],
                 );
               },

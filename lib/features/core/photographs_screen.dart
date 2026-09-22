@@ -3,8 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
+import '../../widgets/ui/ui.dart';
 import 'core_auth.dart';
 
 /// Everything still waiting to be photographed.
@@ -55,31 +54,28 @@ class _PhotographsScreenState extends ConsumerState<PhotographsScreen> {
     final shots = ref.watch(coreShotListProvider);
     final p = context.p;
 
-    return Scaffold(
-      backgroundColor: p.surface1,
-      appBar: AppBar(title: const Text('Photographs')),
+    return AppPage(
+      title: 'Photographs',
+      padded: false,
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: TextField(
+            child: AppTextField(
+              label: 'Search',
               controller: _search,
               onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
-              decoration: InputDecoration(
-                hintText: 'Consignment, name, colour, slot…',
-                prefixIcon: const Icon(Icons.search),
-                border: const OutlineInputBorder(),
-                isDense: true,
-                suffixIcon: _query.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () => setState(() {
-                          _search.clear();
-                          _query = '';
-                        }),
-                      ),
-              ),
+              hint: 'Consignment, name, colour, slot…',
+              suffix: _query.isEmpty
+                  ? const Icon(Icons.search)
+                  : AppIconButton(
+                      icon: Icons.clear,
+                      tooltip: 'Clear search',
+                      onPressed: () => setState(() {
+                        _search.clear();
+                        _query = '';
+                      }),
+                    ),
             ),
           ),
           Expanded(
@@ -153,33 +149,14 @@ class _Empty extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
-
     return Padding(
-      padding: const EdgeInsets.only(top: 80),
-      child: Column(
-        children: [
-          Icon(
-            done ? Icons.check_circle_outline : Icons.search_off,
-            size: 40,
-            color: done ? p.success : p.textMuted,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            done
-                ? 'Nothing is waiting to be photographed.'
-                : 'Nothing matches “$query”.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: p.textSecondary),
-          ),
-          if (done) ...[
-            const SizedBox(height: 6),
-            Text(
-              'Pull down to check again.',
-              style: TextStyle(fontSize: 12, color: p.textMuted),
-            ),
-          ],
-        ],
+      padding: const EdgeInsets.only(top: 52),
+      child: EmptyState(
+        icon: done ? Icons.check_circle_outline : Icons.search_off,
+        title: done
+            ? 'Nothing is waiting to be photographed.'
+            : 'Nothing matches “$query”.',
+        message: done ? 'Pull down to check again.' : null,
       ),
     );
   }
@@ -195,15 +172,10 @@ class _Row extends ConsumerWidget {
     final p = context.p;
     final swatch = row.swatch;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: p.border),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: AppCard(
+        padding: const EdgeInsets.all(12),
         // The same screen the catalogue opens, and the same fallback: the
         // product code where one exists, the design code only where nothing
         // has arrived yet.
@@ -219,118 +191,100 @@ class _Row extends ConsumerWidget {
           );
           if (context.mounted) ref.invalidate(coreShotListProvider);
         },
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: swatch ?? p.surface3,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: p.border),
-                    ),
-                    child: swatch == null
-                        ? Icon(Icons.help_outline, size: 18, color: p.textMuted)
-                        : null,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          row.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                          ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                RowThumb(
+                  size: 40,
+                  color: swatch,
+                  icon: swatch == null ? Icons.help_outline : null,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        row.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          color: p.text,
                         ),
-                        const SizedBox(height: 2),
-                        // The consignment leads, as it does everywhere else.
-                        Row(
-                          children: [
-                            if (row.productCode != null) ...[
-                              Text(
-                                row.productCode!,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  color: p.primary,
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures()
-                                  ],
-                                ),
-                              ),
-                              if (row.colour != null)
-                                Text('  ·  ',
-                                    style: TextStyle(
-                                        fontSize: 12, color: p.textMuted)),
-                            ] else
-                              Text(
-                                'No consignment yet  ·  ',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: p.textMuted,
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
-                            Flexible(
-                              child: Text(
-                                row.colour ?? '',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    fontSize: 12, color: p.textSecondary),
+                      ),
+                      const SizedBox(height: 2),
+                      // The consignment leads, as it does everywhere else.
+                      Row(
+                        children: [
+                          if (row.productCode != null) ...[
+                            Text(
+                              row.productCode!,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: p.primary,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures()
+                                ],
                               ),
                             ),
-                          ],
-                        ),
-                      ],
-                    ),
+                            if (row.colour != null)
+                              Text('  ·  ',
+                                  style: TextStyle(
+                                      fontSize: 12, color: p.textMuted)),
+                          ] else
+                            Text(
+                              'No consignment yet  ·  ',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: p.textMuted,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          Flexible(
+                            child: Text(
+                              row.colour ?? '',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 12, color: p.textSecondary),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Icon(Icons.photo_camera_outlined, color: p.textMuted),
-                ],
-              ),
-              const SizedBox(height: 10),
-              /*
-                The slots, named.
+                ),
+                const SizedBox(width: 8),
+                Icon(Icons.photo_camera_outlined, color: p.textMuted),
+              ],
+            ),
+            const SizedBox(height: 10),
+            /*
+              The slots, named.
 
-                A count — "3 photographs" — would fit on one line and be
-                useless: somebody carrying a saree to a light needs to know it
-                is the pallu and the border, because that decides how they
-                hold it. Naming them is the difference between a worklist and
-                a tally.
-              */
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final slot in row.pending)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 9, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: p.surface3,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: p.border),
-                      ),
-                      child: Text(
-                        slot,
-                        style: TextStyle(fontSize: 11.5, color: p.textSecondary),
-                      ),
-                    ),
-                ],
-              ),
-            ],
-          ),
+              A count — "3 photographs" — would fit on one line and be
+              useless: somebody carrying a saree to a light needs to know it
+              is the pallu and the border, because that decides how they
+              hold it. Naming them is the difference between a worklist and
+              a tally.
+
+              Every slot on this list is by definition still missing, so the
+              badges stay neutral: colouring all of them as warnings would
+              make the whole screen shout and say nothing.
+            */
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final slot in row.pending) StatusBadge(slot),
+              ],
+            ),
+          ],
         ),
       ),
     );

@@ -3,9 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
-import '../../widgets/picker_field.dart';
+import '../../widgets/ui/ui.dart';
 import 'core_auth.dart';
 
 /// Orders Shopify has already reserved, waiting to actually leave.
@@ -34,11 +32,10 @@ class PickingScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final reservations = ref.watch(corePickingProvider);
-    final p = context.p;
 
-    return Scaffold(
-      backgroundColor: p.surface1,
-      appBar: AppBar(title: const Text('Picking')),
+    return AppPage(
+      title: 'Picking',
+      padded: false,
       body: AsyncView<List<CoreReservation>>(
         value: reservations,
         onRetry: () => ref.invalidate(corePickingProvider),
@@ -49,17 +46,11 @@ class PickingScreen extends ConsumerWidget {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
               if (rows.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 80),
-                  child: Column(
-                    children: [
-                      Icon(Icons.inventory_outlined, size: 40, color: p.textMuted),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Nothing waiting to be packed.',
-                        style: TextStyle(color: p.textSecondary),
-                      ),
-                    ],
+                const Padding(
+                  padding: EdgeInsets.only(top: 52),
+                  child: EmptyState(
+                    icon: Icons.inventory_outlined,
+                    title: 'Nothing waiting to be packed.',
                   ),
                 )
               else
@@ -124,92 +115,72 @@ class _ReservationCardState extends ConsumerState<_ReservationCard> {
     final p = context.p;
     final r = widget.reservation;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: p.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      r.designName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      [
-                        r.productCode,
-                        if (r.colour != null) r.colour!,
-                        r.channelName,
-                      ].join('  ·  '),
-                      style: TextStyle(fontSize: 12, color: p.textSecondary),
-                    ),
-                  ],
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: AppCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CardTitle(
+              r.designName,
+              subtitle: [
+                r.productCode,
+                if (r.colour != null) r.colour!,
+                r.channelName,
+              ].join('  ·  '),
+              trailing: Text(
+                '${r.qty}',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                  color: p.text,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
-              Text(
-                '${r.qty}',
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              [
+                if (r.externalOrderName != null) r.externalOrderName!,
+                r.createdAt,
+              ].join('  ·  '),
+              style: TextStyle(fontSize: 11.5, color: p.textMuted),
+            ),
+            const SizedBox(height: 12),
+            if (r.holding.isEmpty)
+              const InlineNotice(
+                'Nowhere internal currently holds this — nothing to pack from.',
+                icon: Icons.warning_amber_outlined,
+                warning: true,
+              )
+            else ...[
+              PickerField(
+                label: 'Pack from',
+                value: _locationId,
+                options: [
+                  for (final h in r.holding)
+                    PickerOption(h.id, '${h.name}  ·  ${h.qty}'),
+                ],
+                onChanged: (v) => setState(() => _locationId = v),
+              ),
+              const SizedBox(height: 10),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: InlineNotice(
+                    _error!,
+                    icon: Icons.error_outline,
+                    warning: true,
+                  ),
+                ),
+              AppButton.primary(
+                label: 'Pack',
+                busy: _busy,
+                onPressed: _locationId == null ? null : _pack,
               ),
             ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            [
-              if (r.externalOrderName != null) r.externalOrderName!,
-              r.createdAt,
-            ].join('  ·  '),
-            style: TextStyle(fontSize: 11.5, color: p.textMuted),
-          ),
-          const SizedBox(height: 12),
-          if (r.holding.isEmpty)
-            Text(
-              'Nowhere internal currently holds this — nothing to pack from.',
-              style: TextStyle(fontSize: 12.5, color: p.danger),
-            )
-          else ...[
-            PickerField(
-              label: 'Pack from',
-              value: _locationId,
-              options: [
-                for (final h in r.holding)
-                  PickerOption(h.id, '${h.name}  ·  ${h.qty}'),
-              ],
-              onChanged: (v) => setState(() => _locationId = v),
-            ),
-            const SizedBox(height: 10),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_error!, style: TextStyle(fontSize: 12, color: p.danger)),
-              ),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: (_busy || _locationId == null) ? null : _pack,
-                child: _busy
-                    ? const SizedBox(
-                        height: 18,
-                        width: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Pack'),
-              ),
-            ),
           ],
-        ],
+        ),
       ),
     );
   }

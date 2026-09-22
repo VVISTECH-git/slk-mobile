@@ -9,9 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../core/api_client.dart';
 import '../../core/product_draft_store.dart';
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
-import '../../widgets/picker_field.dart';
+import '../../widgets/ui/ui.dart';
 import 'core_auth.dart';
 import 'core_photos.dart';
 import 'core_sign_in_screen.dart';
@@ -193,30 +191,31 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
       return;
     }
 
-    final via = await showModalBottomSheet<_CaptureVia>(
-      context: context,
-      backgroundColor: context.p.surface2,
-      builder: (sheet) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    final via = await showAppSheet<_CaptureVia>(
+      context,
+      title: 'Photograph the ${slot.label.toLowerCase()}',
+      child: Builder(
+        builder: (sheet) => AppListGroup(
           children: [
-            ListTile(
+            AppListRow(
               leading: const Icon(Icons.center_focus_strong_outlined),
-              title: Text('Photograph the ${slot.label.toLowerCase()}'),
-              subtitle: const Text(
-                'The frame tells you what to fix and takes the shot itself',
-              ),
+              title: 'Guided photograph',
+              subtitle:
+                  'The frame tells you what to fix and takes the shot itself',
+              chevron: true,
               onTap: () => Navigator.pop(sheet, _CaptureVia.guided),
             ),
-            ListTile(
+            AppListRow(
               leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose from the gallery'),
+              title: 'Choose from the gallery',
+              chevron: true,
               onTap: () => Navigator.pop(sheet, _CaptureVia.gallery),
             ),
-            ListTile(
+            AppListRow(
               leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text('Use the plain camera'),
-              subtitle: const Text('No guide, no checks'),
+              title: 'Use the plain camera',
+              subtitle: 'No guide, no checks',
+              chevron: true,
               onTap: () => Navigator.pop(sheet, _CaptureVia.camera),
             ),
           ],
@@ -474,18 +473,24 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
     // from cache, the moment somebody actually taps to take a photo.
     ref.watch(coreStorageProvider);
 
+    final p = context.p;
+
+    // Kept as a Scaffold rather than an AppPage: the library's header has no
+    // room for a TabBar, and six tabs are the whole shape of this screen.
     return DefaultTabController(
       length: 6,
       child: Scaffold(
-        backgroundColor: context.p.surface1,
+        backgroundColor: p.surface1,
         appBar: AppBar(
           title: const Text('Product Management'),
           actions: [
-            IconButton(
+            AppIconButton(
+              icon: Icons.logout,
               tooltip: 'Sign out of slk-core',
-              icon: const Icon(Icons.logout),
+              color: p.onAppBar,
               onPressed: () => ref.read(coreAuthProvider.notifier).signOut(),
             ),
+            const SizedBox(width: 6),
           ],
           /*
             Six fixed tabs, none of them scrollable.
@@ -519,9 +524,9 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
             // swipe would reveal it. Confirmed against a real failed submit:
             // Stock's own badge was there and correctly counted, just cut off.
             padding: const EdgeInsets.only(right: 44),
-            labelColor: context.p.onAppBar,
-            unselectedLabelColor: context.p.onAppBar.withValues(alpha: 0.72),
-            indicatorColor: context.p.onAppBar,
+            labelColor: p.onAppBar,
+            unselectedLabelColor: p.onAppBar.withValues(alpha: 0.72),
+            indicatorColor: p.onAppBar,
             labelPadding: const EdgeInsets.symmetric(horizontal: 12),
             labelStyle:
                 const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
@@ -757,30 +762,28 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen>
           ),
         ),
         RecordFieldWrap(
-          // Keyed 'openingStock' — what the server's own validation actually
-          // names this error (records/actions.ts), not 'quantity': the two
-          // fields around it are a location and a count, and neither name is
-          // what a failed create reports back.
-          error: fieldErrors['openingStock'],
-          child: TextField(
+          child: AppTextField(
+            // A record needs opening stock to be created at all — the
+            // server refuses one with none — so this is required in
+            // practice even though a record can later be sold down to
+            // zero. Marked the same way every other mandatory field is.
+            label: uom == null ? 'How many' : 'How many ($uom)',
+            required: true,
             controller: _qty,
             focusNode: _qtyFocus,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            // Keyed 'openingStock' — what the server's own validation actually
+            // names this error (records/actions.ts), not 'quantity': the two
+            // fields around it are a location and a count, and neither name is
+            // what a failed create reports back.
+            error: fieldErrors['openingStock'],
             // See the matching comment on the price fields in
             // record_form_fields.dart — same bug, same fix.
             onChanged: (_) => setState(() {
               fieldErrors = {...fieldErrors}..remove('openingStock');
               _scheduleDraftSave();
             }),
-            decoration: InputDecoration(
-              // A record needs opening stock to be created at all — the
-              // server refuses one with none — so this is required in
-              // practice even though a record can later be sold down to
-              // zero. Marked the same way every other mandatory field is.
-              labelText: uom == null ? 'How many *' : 'How many ($uom) *',
-              border: const OutlineInputBorder(),
-            ),
           ),
         ),
         RecordNote(
@@ -805,23 +808,32 @@ class _ResumeDraftBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-      color: p.surface3,
-      child: Row(
-        children: [
-          Icon(Icons.history, size: 18, color: p.textSecondary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Resume unsaved product?',
-              style: TextStyle(fontSize: 13, color: p.text),
+    return Material(
+      color: p.surface2,
+      child: Container(
+        decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.border))),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const InlineNotice(
+              'Resume unsaved product? A record was left part-way through.',
+              icon: Icons.history,
             ),
-          ),
-          TextButton(onPressed: onDiscard, child: const Text('Discard')),
-          FilledButton(onPressed: onContinue, child: const Text('Continue')),
-        ],
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: AppButton.secondary(label: 'Discard', onPressed: onDiscard),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: AppButton.primary(label: 'Continue', onPressed: onContinue),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -832,30 +844,16 @@ class _SignInPrompt extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: context.p.surface1,
-      appBar: AppBar(title: const Text('Product Management')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'This screen uses the stock system, which signs in separately.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: context.p.textSecondary),
-              ),
-              const SizedBox(height: 18),
-              FilledButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const CoreSignInScreen(),
-                  ),
-                ),
-                child: const Text('Sign in'),
-              ),
-            ],
+    return AppPage(
+      title: 'Product Management',
+      body: EmptyState(
+        icon: Icons.lock_outline,
+        title: 'Signed out of the stock system',
+        message: 'This screen uses the stock system, which signs in separately.',
+        actionLabel: 'Sign in',
+        onAction: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const CoreSignInScreen(),
           ),
         ),
       ),

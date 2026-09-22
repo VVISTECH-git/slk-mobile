@@ -9,7 +9,8 @@ import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../theme/app_theme.dart';
+import '../../core/api_client.dart';
+import '../../widgets/ui/ui.dart';
 import 'photo_rules.dart';
 
 /// One photograph this screen is asked for.
@@ -18,6 +19,15 @@ class CaptureSlot {
   final String id;
   final String label;
 }
+
+/// What to tell the person when [GuidedCaptureScreen.onCaptured] threw.
+///
+/// The API writes its refusals for whoever is holding the phone, so those
+/// are shown as they are. Anything else — a dropped connection to storage,
+/// most often — is a Dio error whose toString is request internals nobody
+/// on a floor can act on; that gets a plain line, and the original is logged.
+String _captureFailureMessage(Object e) =>
+    e is ApiException ? e.message : 'Upload failed. Check the connection and try again.';
 
 /// A camera that knows what a saree photograph should look like.
 ///
@@ -272,9 +282,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: context.p.danger),
-      );
+      showError(context, e);
       _resume();
     }
   }
@@ -354,11 +362,10 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     setState(() => _accepting = true);
     try {
       await widget.onCaptured(_slot, file);
-    } catch (e) {
+    } catch (e, stack) {
+      debugPrint('Sending ${_slot.id} failed: $e\n$stack');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: context.p.danger),
-      );
+      showError(context, _captureFailureMessage(e));
       _accepting = false;
       _resume();
       return;
@@ -431,9 +438,19 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
             ),
             Expanded(
               child: switch (_phase) {
-                _Phase.failed => _Failed(message: _failure ?? ''),
-                _Phase.starting => const Center(
-                    child: CircularProgressIndicator(color: Colors.white70),
+                // Neither has a preview behind it yet, so both sit on the
+                // page surface rather than on camera black — the library's
+                // state layouts are drawn for that surface.
+                _Phase.failed => ColoredBox(
+                    color: p.surface1,
+                    child: ErrorState(
+                      title: 'No camera',
+                      message: _failure ?? '',
+                    ),
+                  ),
+                _Phase.starting => ColoredBox(
+                    color: p.surface1,
+                    child: const LoadingState(message: 'Starting the camera…'),
                   ),
                 _ => LayoutBuilder(
                     builder: (context, box) => GestureDetector(
@@ -460,10 +477,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
                               _ => _verdict.ok ? p.success : p.danger,
                             },
                           ),
-                          if (_phase == _Phase.processing)
-                            const Center(
-                              child: CircularProgressIndicator(color: Colors.white),
-                            ),
+                          if (_phase == _Phase.processing) const LoadingState(),
                         ],
                       ),
                     ),
@@ -510,8 +524,9 @@ class _Header extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
       child: Row(
         children: [
-          IconButton(
-            icon: const Icon(Icons.close, color: Colors.white),
+          AppIconButton(
+            icon: Icons.close,
+            color: Colors.white,
             tooltip: 'Stop photographing',
             onPressed: () => Navigator.of(context).pop(),
           ),
@@ -535,8 +550,9 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.help_outline, color: Colors.white),
+          AppIconButton(
+            icon: Icons.help_outline,
+            color: Colors.white,
             tooltip: 'How to photograph',
             onPressed: onHelp,
           ),
@@ -601,34 +617,37 @@ class _Footer extends StatelessWidget {
     switch (phase) {
       case _Phase.review:
         final r = review;
-        if (accepting) {
-          line = const _Line('Sending…', colour: Colors.white70);
-          actions = const SizedBox(
+        if (r == null || (r.ok && !r.warning)) {
+          // Nothing to decide: a good photograph is accepted by itself, so
+          // while it sends there are no buttons to hold, only the wait.
+          line = accepting
+              ? const _Line('Sending…', colour: Colors.white70)
+              : _Line('Captured', colour: p.success);
+          actions = SizedBox(
             height: 56,
-            child: Center(
-              child: SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-              ),
-            ),
+            child: accepting ? const LoadingState() : null,
           );
-        } else if (r == null || (r.ok && !r.warning)) {
-          line = _Line('Captured', colour: p.success);
-          actions = const SizedBox(height: 56);
         } else {
-          line = _Line(r.message, colour: r.ok ? Colors.amber : p.danger);
+          line = accepting
+              ? const _Line('Sending…', colour: Colors.white70)
+              : _Line(r.message, colour: r.ok ? p.accent : p.danger);
+          // Both held while the send runs — the busy button says why.
           actions = Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              OutlinedButton(
-                onPressed: onRetake,
-                style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
-                child: const Text('Retake'),
+              AppButton.secondary(
+                label: 'Retake',
+                expand: false,
+                onPressed: accepting ? null : onRetake,
               ),
               if (r.ok) ...[
                 const SizedBox(width: 12),
-                FilledButton(onPressed: onAccept, child: const Text('Use it anyway')),
+                AppButton.primary(
+                  label: 'Use it anyway',
+                  expand: false,
+                  busy: accepting,
+                  onPressed: onAccept,
+                ),
               ],
             ],
           );
@@ -696,32 +715,6 @@ class _Line extends StatelessWidget {
   }
 }
 
-class _Failed extends StatelessWidget {
-  const _Failed({required this.message});
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.no_photography_outlined, color: Colors.white54, size: 44),
-            const SizedBox(height: 14),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white, height: 1.4),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// The do-and-don't page — shown once, then behind the "?".
 ///
 /// Three things, because three is what a person reads while holding a
@@ -740,60 +733,44 @@ class _CaptureGuide {
   }
 
   static Future<void> show(BuildContext context) async {
-    final p = context.p;
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: p.surface2,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheet) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Photograph a saree easily',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: p.text),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'The frame turns green when the shot is right, and takes '
-                'itself. Until then it says what to change.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: p.textSecondary),
-              ),
-              const SizedBox(height: 18),
-              const _Tip(
-                icon: Icons.crop_free,
-                title: 'Fill the frame with the cloth',
-                detail: 'Edge to edge — no table, floor or wall showing. '
-                    'The border goes sideways, everything else upright.',
-              ),
-              const _Tip(
-                icon: Icons.wb_sunny_outlined,
-                title: 'Flat, in daylight',
-                detail: 'Spread it out under even light. Not in direct sun, '
-                    'not in a dim corner.',
-              ),
-              const _Tip(
-                icon: Icons.back_hand_outlined,
-                title: 'Hold still for a moment',
-                detail: 'Green means hold it there — the photograph is taken '
-                    'for you within a second.',
-              ),
-              const SizedBox(height: 18),
-              FilledButton(
-                onPressed: () => Navigator.of(sheet).pop(),
-                style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
-                child: const Text('Start photographing'),
-              ),
-            ],
-          ),
+    await showAppSheet<void>(
+      context,
+      title: 'Photograph a saree easily',
+      subtitle: 'The frame turns green when the shot is right, and takes '
+          'itself. Until then it says what to change.',
+      child: Builder(
+        builder: (sheet) => Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const AppListGroup(
+              children: [
+                _Tip(
+                  icon: Icons.crop_free,
+                  title: 'Fill the frame with the cloth',
+                  detail: 'Edge to edge — no table, floor or wall showing. '
+                      'The border goes sideways, everything else upright.',
+                ),
+                _Tip(
+                  icon: Icons.wb_sunny_outlined,
+                  title: 'Flat, in daylight',
+                  detail: 'Spread it out under even light. Not in direct sun, '
+                      'not in a dim corner.',
+                ),
+                _Tip(
+                  icon: Icons.back_hand_outlined,
+                  title: 'Hold still for a moment',
+                  detail: 'Green means hold it there — the photograph is taken '
+                      'for you within a second.',
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            AppButton.primary(
+              label: 'Start photographing',
+              onPressed: () => Navigator.of(sheet).pop(),
+            ),
+          ],
         ),
       ),
     );
@@ -811,34 +788,10 @@ class _Tip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: p.primary.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: p.primary),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: TextStyle(fontWeight: FontWeight.w700, color: p.text)),
-                const SizedBox(height: 2),
-                Text(detail, style: TextStyle(fontSize: 12.5, color: p.textSecondary, height: 1.35)),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return AppListRow(
+      leading: RowThumb(icon: icon),
+      title: title,
+      subtitle: detail,
     );
   }
 }

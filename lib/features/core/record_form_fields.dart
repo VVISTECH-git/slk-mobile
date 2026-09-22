@@ -4,8 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/picker_field.dart';
+import '../../widgets/ui/ui.dart';
 import 'multi_picker_field.dart';
 import 'record_fields.dart';
 
@@ -607,32 +606,22 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
           ),
 
         const SizedBox(height: 8),
-        TextField(
+        _ProductNameField(
           controller: nameField,
-          // "Kalamkari", "Mulmul", "Pallu" are not typos, and a keyboard
-          // that "fixes" them into English words would save the wrong name.
-          autocorrect: false,
-          enableSuggestions: false,
-          textCapitalization: TextCapitalization.words,
-          decoration: InputDecoration(
-            labelText: 'Product name',
-            border: const OutlineInputBorder(),
-            // What Create will actually save — not a slogan. Only a generic
-            // placeholder while there is nothing yet to compose from.
-            hintText: () {
-              final preview = composeDesignNamePreview(
-                options: o,
-                descriptorIds: descriptors,
-                attrs: attrs,
-                home: home,
-              );
-              return preview.isEmpty ? 'Builds itself from your choices' : preview;
-            }(),
-            helperText: nameIsCustom
-                ? 'Edited by hand — it will stop following attribute changes'
-                : 'Composed from the taxonomy. Type to override.',
-            helperMaxLines: 2,
-          ),
+          // What Create will actually save — not a slogan. Only a generic
+          // placeholder while there is nothing yet to compose from.
+          hint: () {
+            final preview = composeDesignNamePreview(
+              options: o,
+              descriptorIds: descriptors,
+              attrs: attrs,
+              home: home,
+            );
+            return preview.isEmpty ? 'Builds itself from your choices' : preview;
+          }(),
+          helper: nameIsCustom
+              ? 'Edited by hand — it will stop following attribute changes'
+              : 'Composed from the taxonomy. Type to override.',
           onChanged: (v) => setState(() {
             nameIsCustom = v.trim().isNotEmpty;
             onFieldChanged();
@@ -848,14 +837,10 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
           }),
         ),
         const SizedBox(height: 14),
-        TextField(
+        AppTextField(
+          label: 'Notes',
           controller: notesField,
-          minLines: 3,
           maxLines: 6,
-          decoration: const InputDecoration(
-            labelText: 'Notes',
-            border: OutlineInputBorder(),
-          ),
           onChanged: (_) => onFieldChanged(),
         ),
       ],
@@ -871,8 +856,12 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
       children: [
         for (final p in priceKinds)
           RecordFieldWrap(
-            error: fieldErrors[p.key],
-            child: TextField(
+            child: AppTextField(
+              // "per Metre" rather than a generic "per qty": fabric at
+              // ₹1,000 means something quite different from a saree at
+              // ₹1,000.
+              label: '${p.label}$per',
+              required: p.key == 'retail',
               controller: prices[p.key],
               focusNode: priceFocusNodes[p.key],
               keyboardType:
@@ -880,6 +869,9 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
               inputFormatters: [
                 FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
               ],
+              prefixText: '₹ ',
+              helper: p.note,
+              error: fieldErrors[p.key],
               // A price rejected by the last submit stayed marked red even
               // after it was corrected — nothing ever told fieldErrors the
               // field had changed. Every picker field already clears its own
@@ -888,15 +880,6 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
                 fieldErrors = {...fieldErrors}..remove(p.key);
                 onFieldChanged();
               }),
-              decoration: InputDecoration(
-                // "per Metre" rather than a generic "per qty": fabric at
-                // ₹1,000 means something quite different from a saree at
-                // ₹1,000.
-                labelText: '${p.label}${p.key == 'retail' ? ' *' : ''}$per',
-                prefixText: '₹ ',
-                helperText: p.note,
-                border: const OutlineInputBorder(),
-              ),
             ),
           ),
       ],
@@ -988,6 +971,43 @@ mixin RecordFormFields<T extends StatefulWidget> on State<T> {
 
 // ── Chrome shared by both screens ────────────────────────────────────────────
 
+/// The product name box. Composed by hand rather than an [AppTextField]
+/// because that one has no way to switch autocorrect off — and "Kalamkari",
+/// "Mulmul", "Pallu" are not typos; a keyboard that "fixes" them into English
+/// words would save the wrong name. Same label-above look, same box.
+class _ProductNameField extends StatelessWidget {
+  const _ProductNameField({
+    required this.controller,
+    required this.hint,
+    required this.helper,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final String hint;
+  final String helper;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        AppTextField(
+          label: 'Product name',
+          controller: controller,
+          autocorrect: false,
+          enableSuggestions: false,
+          textCapitalization: TextCapitalization.words,
+          hint: hint,
+          helper: helper,
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+}
+
 class RecordTabBody extends StatelessWidget {
   const RecordTabBody({super.key, required this.children});
 
@@ -1010,17 +1030,7 @@ class RecordSectionHeading extends StatelessWidget {
   final String text;
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: 8, bottom: 10),
-        child: Text(
-          text,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: context.p.text,
-          ),
-        ),
-      );
+  Widget build(BuildContext context) => SectionHeader(text, top: 8);
 }
 
 class RecordNote extends StatelessWidget {
@@ -1029,22 +1039,10 @@ class RecordNote extends StatelessWidget {
   final String text;
 
   @override
-  Widget build(BuildContext context) {
-    final p = context.p;
-
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: p.surface3,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(fontSize: 12, color: p.textSecondary, height: 1.4),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: InlineNotice(text),
+      );
 }
 
 /// A thumbnail and a Retake, or a plain "Take photo now" button — whichever
@@ -1070,28 +1068,27 @@ class _CaptureRow extends StatelessWidget {
     if (file == null) {
       return Align(
         alignment: Alignment.centerLeft,
-        child: OutlinedButton.icon(
+        child: AppButton.secondary(
+          label: 'Take photo now',
+          icon: Icons.add_a_photo_outlined,
+          expand: false,
           onPressed: onCapture,
-          icon: const Icon(Icons.add_a_photo_outlined, size: 16),
-          label: const Text('Take photo now'),
         ),
       );
     }
 
     return Row(
       children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Image.file(file!, width: 44, height: 44, fit: BoxFit.cover),
-        ),
+        RowThumb(image: FileImage(file!)),
         const SizedBox(width: 10),
-        Text('$label photographed',
-            style: TextStyle(fontSize: 12.5, color: p.success)),
-        const Spacer(),
-        TextButton(onPressed: onCapture, child: const Text('Retake')),
-        IconButton(
+        Expanded(
+          child: Text('$label photographed',
+              style: TextStyle(fontSize: 12.5, color: p.success)),
+        ),
+        AppButton.ghost(label: 'Retake', onPressed: onCapture),
+        AppIconButton(
+          icon: Icons.close,
           tooltip: 'Remove this photo',
-          icon: Icon(Icons.close, size: 18, color: p.textMuted),
           onPressed: onRemove,
         ),
       ],
@@ -1108,13 +1105,8 @@ class SignedInActor extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
 
-    return Container(
+    return AppCard(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: p.border),
-      ),
       child: Row(
         children: [
           Icon(Icons.badge_outlined, size: 18, color: p.textSecondary),
@@ -1171,6 +1163,10 @@ Map<int, int> tabErrorCounts(Map<String, String> fieldErrors) {
 
 /// A plain [Tab], or the same label with a small count badge when [count]
 /// is above zero — used to mark which tab an error actually lives on.
+///
+/// The badge sits on the app bar, so it is drawn in the app bar's own
+/// foreground colour with the count in the palette's danger red — a red pill
+/// on a terracotta bar was the thing nobody could see.
 Tab tabWithErrorBadge(String label, int count) {
   if (count == 0) return Tab(text: label);
 
@@ -1180,21 +1176,26 @@ Tab tabWithErrorBadge(String label, int count) {
       children: [
         Text(label),
         const SizedBox(width: 5),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-          decoration: BoxDecoration(
-            color: const Color(0xFFE53935),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            '$count',
-            style: const TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-              height: 1.2,
-            ),
-          ),
+        Builder(
+          builder: (context) {
+            final p = context.p;
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: p.onAppBar,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: p.danger,
+                  height: 1.2,
+                ),
+              ),
+            );
+          },
         ),
       ],
     ),
@@ -1211,6 +1212,10 @@ Tab tabWithErrorBadge(String label, int count) {
 /// act on, naming a field without saying where it was. Collapsed to a count
 /// by default, and every listed error is now a way to get there: tapping one
 /// switches to its tab and, for the fields that have one, focuses it too.
+///
+/// Laid out like the library's [BottomActionBar] — same surface, same top
+/// border, same padding — composed by hand because that one holds only
+/// buttons and a note, and this has the error summary above them.
 class RecordSaveBar extends StatefulWidget {
   const RecordSaveBar({
     super.key,
@@ -1369,111 +1374,90 @@ class _RecordSaveBarState extends State<RecordSaveBar> {
     final p = context.p;
     final errors = widget.errors;
 
-    return SafeArea(
+    // Only the last tab actually files anything — every other tab hands the
+    // button to whatever moves the person on, which is exactly what "Next"
+    // is.
+    final onLastTab = !widget.sequential || _onLastTab;
+
+    return Material(
+      color: p.surface2,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-        decoration: BoxDecoration(
-          color: p.surface2,
-          border: Border(top: BorderSide(color: p.border)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (errors.isNotEmpty) ...[
-              InkWell(
-                onTap: () => setState(() => _expanded = !_expanded),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline, size: 16, color: p.danger),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          '${errors.length} field${errors.length == 1 ? '' : 's'} '
-                          'need attention',
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                            color: p.danger,
-                          ),
-                        ),
-                      ),
-                      Icon(
-                        _expanded ? Icons.expand_less : Icons.expand_more,
-                        size: 18,
-                        color: p.danger,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              if (_expanded)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (final entry in errors.entries)
-                        InkWell(
-                          onTap: () => _jumpTo(entry.key),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 5),
-                            child: Row(
-                              children: [
-                                Icon(Icons.chevron_right,
-                                    size: 16, color: p.danger),
-                                const SizedBox(width: 2),
-                                Expanded(
-                                  child: Text(
-                                    entry.value,
-                                    style: TextStyle(
-                                        fontSize: 12, color: p.danger),
-                                  ),
-                                ),
-                              ],
+        decoration: BoxDecoration(border: Border(top: BorderSide(color: p.border))),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (errors.isNotEmpty) ...[
+                  InkWell(
+                    borderRadius: BorderRadius.circular(Radii.sm),
+                    onTap: () => setState(() => _expanded = !_expanded),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 48),
+                      child: Row(
+                        children: [
+                          Icon(Icons.error_outline, size: 18, color: p.danger),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '${errors.length} field${errors.length == 1 ? '' : 's'} '
+                              'need attention',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: p.danger,
+                              ),
                             ),
                           ),
-                        ),
-                    ],
-                  ),
-                ),
-            ],
-            () {
-              // Only the last tab actually files anything — every other tab
-              // hands the button to whatever moves the person on, which is
-              // exactly what "Next" is.
-              final onLastTab = !widget.sequential || _onLastTab;
-
-              return FilledButton(
-                onPressed: widget.busy
-                    ? null
-                    : (onLastTab
-                        ? widget.onSave
-                        : _onNext),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                ),
-                child: widget.busy
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : onLastTab
-                        ? Text(widget.label)
-                        : const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text('Next'),
-                              SizedBox(width: 6),
-                              Icon(Icons.arrow_forward, size: 18),
-                            ],
+                          Icon(
+                            _expanded ? Icons.expand_less : Icons.expand_more,
+                            size: 20,
+                            color: p.danger,
                           ),
-              );
-            }(),
-          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (_expanded)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final entry in errors.entries)
+                          InkWell(
+                            borderRadius: BorderRadius.circular(Radii.sm),
+                            onTap: () => _jumpTo(entry.key),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(minHeight: 48),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.chevron_right, size: 18, color: p.danger),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      entry.value,
+                                      style: TextStyle(fontSize: 13, color: p.danger),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  const SizedBox(height: 6),
+                ],
+                AppButton.primary(
+                  label: onLastTab ? widget.label : 'Next',
+                  icon: onLastTab ? null : Icons.arrow_forward,
+                  busy: widget.busy,
+                  onPressed: onLastTab ? widget.onSave : _onNext,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

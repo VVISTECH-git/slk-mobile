@@ -32,7 +32,7 @@ class _SkeletonState extends State<Skeleton> with SingleTickerProviderStateMixin
         height: widget.height,
         width: widget.width,
         decoration: BoxDecoration(
-          color: Color.lerp(const Color(0xFFEDE4D8), const Color(0xFFF7F1E8), _c.value),
+          color: Color.lerp(context.p.border, context.p.surface3, _c.value),
           borderRadius: BorderRadius.circular(widget.radius),
         ),
       ),

@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
-import '../../widgets/theme_button.dart';
+import '../../widgets/ui/ui.dart';
 import 'bale_providers.dart';
 import 'thaan_labels_pdf.dart';
 
@@ -89,90 +87,80 @@ class _ThaanLabelsScreenState extends ConsumerState<ThaanLabelsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
     final count = _rangeValid ? _toIndex - _fromIndex + 1 : 0;
+    final bothFound = _fromIndex != -1 && _toIndex != -1;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_baleCode == null ? 'Print QR codes' : 'Print QR codes — $_baleCode'),
-        actions: [const ThemeButton()],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _codes.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      'No Thaans here have a QR code yet.',
-                      style: TextStyle(color: p.textSecondary),
-                    ),
+    final Widget body;
+    if (_loading) {
+      body = const LoadingState(message: 'Loading Thaan codes…');
+    } else if (_codes.isEmpty) {
+      body = const EmptyState(icon: Icons.qr_code_2, title: 'No Thaans here have a QR code yet.');
+    } else {
+      body = SingleChildScrollView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            InlineNotice(
+              '${_codes.length} Thaan${_codes.length == 1 ? '' : 's'} coded, '
+              '${_codes.first} to ${_codes.last}.',
+              icon: Icons.qr_code_2,
+            ),
+            const SizedBox(height: 16),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: AppTextField(
+                    label: 'From code',
+                    controller: _from,
+                    textCapitalization: TextCapitalization.characters,
+                    error: _fromIndex == -1 ? 'Not on this bale' : null,
+                    onChanged: (_) => setState(() {}),
                   ),
-                )
-              : ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    Text(
-                      '${_codes.length} Thaan${_codes.length == 1 ? '' : 's'} coded, '
-                      '${_codes.first} to ${_codes.last}.',
-                      style: TextStyle(fontSize: 13, color: p.textSecondary),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _from,
-                            textCapitalization: TextCapitalization.characters,
-                            decoration: InputDecoration(
-                              labelText: 'From code',
-                              errorText: _fromIndex == -1 ? 'Not on this bale' : null,
-                            ),
-                            onChanged: (_) => setState(() {}),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextField(
-                            controller: _to,
-                            textCapitalization: TextCapitalization.characters,
-                            decoration: InputDecoration(
-                              labelText: 'To code',
-                              errorText: _toIndex == -1 ? 'Not on this bale' : null,
-                            ),
-                            onChanged: (_) => setState(() {}),
-                          ),
-                        ),
-                      ],
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        !_rangeValid && _fromIndex != -1 && _toIndex != -1
-                            ? 'From has to come before To — swap them.'
-                            : count == _codes.length
-                                ? 'Printing all of them.'
-                                : "Printer ran out partway? Set From to the last label that actually printed — "
-                                  'labels usually resume right after it.',
-                        style: TextStyle(fontSize: 12, color: p.textMuted),
-                      ),
-                    ),
-                  ],
                 ),
-      bottomNavigationBar: _codes.isEmpty
+                const SizedBox(width: 12),
+                Expanded(
+                  child: AppTextField(
+                    label: 'To code',
+                    controller: _to,
+                    textCapitalization: TextCapitalization.characters,
+                    error: _toIndex == -1 ? 'Not on this bale' : null,
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (!_rangeValid && bothFound)
+              const InlineNotice('From has to come before To — swap them.', icon: Icons.swap_horiz, warning: true)
+            else if (count == _codes.length)
+              const InlineNotice('Printing all of them.', icon: Icons.print_outlined)
+            else
+              const InlineNotice(
+                'Printer ran out partway? Set From to the last label that actually printed — '
+                'labels usually resume right after it.',
+              ),
+          ],
+        ),
+      );
+    }
+
+    return AppPage(
+      title: 'Print QR codes',
+      subtitle: _baleCode,
+      actions: const [ThemeButton()],
+      padded: false,
+      body: body,
+      bottomBar: _codes.isEmpty
           ? null
-          : SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: FilledButton.icon(
-                  onPressed: _printing || !_rangeValid ? null : _print,
-                  icon: _printing
-                      ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.print_outlined),
-                  label: Text(_printing ? 'Preparing…' : 'Print $count label${count == 1 ? '' : 's'}'),
-                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-                ),
+          : BottomActionBar(
+              primary: AppButton.primary(
+                label: 'Print $count label${count == 1 ? '' : 's'}',
+                icon: Icons.print_outlined,
+                busy: _printing,
+                onPressed: _rangeValid ? _print : null,
               ),
             ),
     );

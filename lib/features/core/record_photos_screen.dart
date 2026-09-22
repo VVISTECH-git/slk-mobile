@@ -4,12 +4,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../core/api_client.dart';
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
+import '../../widgets/ui/ui.dart';
 import 'core_auth.dart';
 import 'core_photos.dart';
 import 'guided_capture_screen.dart';
+
+/// What to tell the person when a photograph did not arrive.
+///
+/// The API writes its refusals for whoever is holding the phone, so those
+/// are shown as they are. A dropped connection to storage is a Dio error
+/// whose toString is a wall of request internals nobody on a floor can act
+/// on — that one gets a plain line, and the original goes to the log.
+String _uploadFailureMessage(Object e) =>
+    e is ApiException ? e.message : 'Upload failed. Check the connection and try again.';
 
 /// Photographing a record that exists.
 ///
@@ -121,8 +130,9 @@ class _RecordPhotosScreenState extends ConsumerState<RecordPhotosScreen> {
       if (!mounted) return;
       showOk(context, '${slot.label} saved.');
       _refresh();
-    } catch (e) {
-      if (mounted) showError(context, e);
+    } catch (e, stack) {
+      debugPrint('Upload of ${slot.id} failed: $e\n$stack');
+      if (mounted) showError(context, _uploadFailureMessage(e));
     } finally {
       if (mounted) setState(() => _sending.remove(slot.id));
     }
@@ -171,77 +181,58 @@ class _RecordPhotosScreenState extends ConsumerState<RecordPhotosScreen> {
   }
 
   void _choose(_Slot slot, List<_Slot> all) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: context.p.surface2,
-      builder: (sheet) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    final p = context.p;
+    showAppSheet<void>(
+      context,
+      title: slot.label,
+      child: Builder(
+        builder: (sheet) => AppListGroup(
           children: [
-            ListTile(
-              leading: const Icon(Icons.center_focus_strong_outlined),
-              title: Text('Photograph the ${slot.label.toLowerCase()}'),
-              subtitle: const Text(
-                'The frame tells you what to fix and takes the shot itself',
-              ),
+            AppListRow(
+              leading: Icon(Icons.center_focus_strong_outlined, color: p.textSecondary),
+              title: 'Photograph the ${slot.label.toLowerCase()}',
+              subtitle: 'The frame tells you what to fix and takes the shot itself',
               onTap: () {
                 Navigator.pop(sheet);
                 _guided(slot, all);
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose from the gallery'),
+            AppListRow(
+              leading: Icon(Icons.photo_library_outlined, color: p.textSecondary),
+              title: 'Choose from the gallery',
               onTap: () {
                 Navigator.pop(sheet);
                 _pick(slot, ImageSource.gallery);
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text('Use the plain camera'),
-              subtitle: const Text('No guide, no checks'),
+            AppListRow(
+              leading: Icon(Icons.photo_camera_outlined, color: p.textSecondary),
+              title: 'Use the plain camera',
+              subtitle: 'No guide, no checks',
               onTap: () {
                 Navigator.pop(sheet);
                 _pick(slot, ImageSource.camera);
               },
             ),
             if (slot.url != null)
-              ListTile(
-                leading: Icon(Icons.delete_outline, color: context.p.danger),
-                title: Text(
-                  'Remove this photograph',
-                  style: TextStyle(color: context.p.danger),
-                ),
-                subtitle: const Text('The slot stays on the shot list'),
+              AppListRow(
+                leading: Icon(Icons.delete_outline, color: p.danger),
+                title: 'Remove this photograph',
+                subtitle: 'The slot stays on the shot list',
                 onTap: () async {
                   Navigator.pop(sheet);
                   // Irreversible from here — the file is gone from storage,
                   // and a photograph took somebody a trip to the shelf.
-                  final sure = await showDialog<bool>(
-                    context: context,
-                    builder: (dialog) => AlertDialog(
-                      title: Text('Remove the ${slot.label.toLowerCase()} photograph?'),
-                      content: const Text(
-                        'The slot stays on the shot list, but the photograph '
+                  final sure = await showConfirmDialog(
+                    context,
+                    title: 'Remove the ${slot.label.toLowerCase()} photograph?',
+                    message: 'The slot stays on the shot list, but the photograph '
                         'itself cannot be brought back.',
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(dialog, false),
-                          child: const Text('Keep it'),
-                        ),
-                        FilledButton(
-                          onPressed: () => Navigator.pop(dialog, true),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: context.p.danger,
-                          ),
-                          child: const Text('Remove'),
-                        ),
-                      ],
-                    ),
+                    confirmLabel: 'Remove',
+                    cancelLabel: 'Keep it',
+                    danger: true,
                   );
-                  if (sure == true && mounted) await _remove(slot);
+                  if (sure && mounted) await _remove(slot);
                 },
               ),
           ],
@@ -254,9 +245,10 @@ class _RecordPhotosScreenState extends ConsumerState<RecordPhotosScreen> {
   Widget build(BuildContext context) {
     final storage = ref.watch(coreStorageProvider);
 
-    return Scaffold(
-      backgroundColor: context.p.surface1,
-      appBar: AppBar(title: Text('Photographs · ${widget.code}')),
+    return AppPage(
+      title: 'Photographs',
+      subtitle: widget.code,
+      padded: false,
       body: AsyncView<StorageState>(
         value: storage,
         onRetry: () => ref.invalidate(coreStorageProvider),
@@ -264,10 +256,10 @@ class _RecordPhotosScreenState extends ConsumerState<RecordPhotosScreen> {
           future: _slots,
           builder: (context, snap) {
             if (snap.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
+              return const LoadingState(rows: 4);
             }
             if (snap.hasError) {
-              return _Retry(message: '${snap.error}', onRetry: _refresh);
+              return ErrorState(message: '${snap.error}', onRetry: _refresh);
             }
 
             return _list(snap.data!, state);
@@ -278,19 +270,11 @@ class _RecordPhotosScreenState extends ConsumerState<RecordPhotosScreen> {
   }
 
   Widget _list(_Slots slots, StorageState storage) {
-    final p = context.p;
-
     if (slots.wanted.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(
-            'This record asks for no photographs. Tick the slots it needs on '
-            'the Images tab when creating it.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: p.textSecondary),
-          ),
-        ),
+      return const EmptyState(
+        icon: Icons.photo_camera_outlined,
+        title: 'This record asks for no photographs.',
+        message: 'Tick the slots it needs on the Images tab when creating it.',
       );
     }
 
@@ -299,42 +283,27 @@ class _RecordPhotosScreenState extends ConsumerState<RecordPhotosScreen> {
       children: [
         // Said before anyone takes a photograph, not after six of them fail.
         if (!storage.ready)
-          Container(
-            margin: const EdgeInsets.only(bottom: 16),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: p.danger.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: p.danger.withValues(alpha: 0.3)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Photographs cannot be saved yet',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: p.danger,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Image storage is not set up on the server. Missing '
-                  '${storage.missing.join(", ")}.',
-                  style: TextStyle(fontSize: 12, color: p.danger, height: 1.4),
-                ),
-              ],
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: InlineNotice(
+              'Photographs cannot be saved yet. Image storage is not set up '
+              'on the server. Missing ${storage.missing.join(", ")}.',
+              icon: Icons.cloud_off_outlined,
+              warning: true,
             ),
           ),
 
-        for (final slot in slots.wanted)
-          _SlotTile(
-            slot: slot,
-            sending: _sending.containsKey(slot.id),
-            enabled: storage.ready,
-            onTap: () => _choose(slot, slots.wanted),
-          ),
+        AppListGroup(
+          children: [
+            for (final slot in slots.wanted)
+              _SlotTile(
+                slot: slot,
+                sending: _sending.containsKey(slot.id),
+                enabled: storage.ready,
+                onTap: () => _choose(slot, slots.wanted),
+              ),
+          ],
+        ),
       ],
     );
   }
@@ -373,95 +342,35 @@ class _SlotTile extends StatelessWidget {
     final p = context.p;
     final taken = slot.url != null;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: p.border),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        leading: SizedBox(
-          width: 56,
-          height: 56,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: sending
-                ? Center(
-                    child: SizedBox(
-                      height: 22,
-                      width: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: p.primary,
-                      ),
-                    ),
-                  )
-                : taken
-                    ? Image.network(
-                        slot.url!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => Container(
-                          color: p.surface3,
-                          child: Icon(Icons.broken_image_outlined,
-                              color: p.textMuted),
-                        ),
-                      )
-                    : Container(
-                        color: p.surface3,
-                        child: Icon(Icons.photo_camera_outlined,
-                            color: p.textMuted),
-                      ),
+    final Widget leading = sending
+        ? const SizedBox(width: 48, height: 48, child: LoadingState())
+        : RowThumb(
+            size: 48,
+            image: taken ? NetworkImage(slot.url!) : null,
+            icon: taken ? null : Icons.photo_camera_outlined,
+          );
+
+    final StatusBadge state = sending
+        ? const StatusBadge('Sending…')
+        : taken
+            ? const StatusBadge('Photographed', tone: BadgeTone.success, icon: Icons.check)
+            : const StatusBadge('Still to be taken', tone: BadgeTone.warning);
+
+    return AppListRow(
+      title: slot.label,
+      leading: leading,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          state,
+          const SizedBox(width: 6),
+          Icon(
+            taken ? Icons.more_horiz : Icons.add_a_photo_outlined,
+            color: enabled ? p.text : p.textMuted,
           ),
-        ),
-        title: Text(
-          slot.label,
-          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-        ),
-        subtitle: Text(
-          sending
-              ? 'Sending…'
-              : taken
-                  ? 'Photographed'
-                  : 'Still to be taken',
-          style: TextStyle(
-            fontSize: 12,
-            color: taken ? p.success : p.textSecondary,
-          ),
-        ),
-        trailing: Icon(
-          taken ? Icons.more_horiz : Icons.add_a_photo_outlined,
-          color: enabled ? p.text : p.textMuted,
-        ),
-        onTap: sending || !enabled ? null : onTap,
+        ],
       ),
+      onTap: sending || !enabled ? null : onTap,
     );
   }
-}
-
-class _Retry extends StatelessWidget {
-  const _Retry({required this.message, required this.onRetry});
-
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: context.p.textSecondary),
-              ),
-              const SizedBox(height: 16),
-              FilledButton(onPressed: onRetry, child: const Text('Try again')),
-            ],
-          ),
-        ),
-      );
 }

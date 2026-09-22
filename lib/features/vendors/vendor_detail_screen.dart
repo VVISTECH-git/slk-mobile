@@ -3,9 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
-import '../../widgets/theme_button.dart';
+import '../../widgets/ui/ui.dart';
 import 'vendor_providers.dart';
 import 'vendor_status.dart';
 
@@ -54,10 +52,12 @@ class _VendorDetailScreenState extends ConsumerState<VendorDetailScreen> {
   }
 
   Future<void> _priceSelected(List<CoreVendorLedgerEntry> selectedRows) async {
-    final rate = await showModalBottomSheet<double>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => _RateSheet(entries: selectedRows),
+    final pieces = selectedRows.fold<int>(0, (s, e) => s + (e.pieceCount ?? 0));
+    final rate = await showAppSheet<double>(
+      context,
+      title: 'Price ${selectedRows.length} transaction${selectedRows.length == 1 ? "" : "s"}',
+      subtitle: '${selectedRows.first.stage} · $pieces piece${pieces == 1 ? "" : "s"} total.',
+      child: _RateSheet(entries: selectedRows),
     );
     if (rate == null) return;
     await _run(
@@ -74,10 +74,10 @@ class _VendorDetailScreenState extends ConsumerState<VendorDetailScreen> {
 
   Future<void> _paySelected(List<CoreVendorLedgerEntry> selectedRows) async {
     final total = selectedRows.fold<double>(0, (s, e) => s + (e.amount ?? 0));
-    final draft = await showModalBottomSheet<_PayDraft>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => _PaySheet(total: total),
+    final draft = await showAppSheet<_PayDraft>(
+      context,
+      title: 'Pay ₹${total.toStringAsFixed(0)}',
+      child: _PaySheet(total: total),
     );
     if (draft == null) return;
     await _run(
@@ -92,10 +92,11 @@ class _VendorDetailScreenState extends ConsumerState<VendorDetailScreen> {
   }
 
   Future<void> _recordPayment() async {
-    final draft = await showModalBottomSheet<_RecordPaymentDraft>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => const _RecordPaymentSheet(),
+    final draft = await showAppSheet<_RecordPaymentDraft>(
+      context,
+      title: 'Record payment',
+      subtitle: "Against this vendor's running balance — not tied to any particular transaction.",
+      child: const _RecordPaymentSheet(),
     );
     if (draft == null) return;
     // One key per sheet the person filled in — a retry of this same payment
@@ -113,95 +114,102 @@ class _VendorDetailScreenState extends ConsumerState<VendorDetailScreen> {
     );
   }
 
+  Future<void> _writeOff(CoreDamagedThaan d) async {
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Write off this Thaan?',
+      message: '${d.thaanCode ?? "This Thaan"} from bale ${d.baleCode} will be written off. This cannot be undone.',
+      confirmLabel: 'Write off',
+      danger: true,
+    );
+    if (!ok) return;
+    await _run(
+      () => ref.read(vendorRepositoryProvider).writeOffDamaged(d.id),
+      okMessage: 'Written off.',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
     final ledger = ref.watch(vendorLedgerProvider(widget.vendorId));
     final damaged = ref.watch(vendorDamagedProvider(widget.vendorId));
 
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.vendorName ?? 'Vendor'), actions: const [ThemeButton()]),
+    // The selection bar is pinned under the page, so what it can do is
+    // worked out here from whatever the ledger currently holds.
+    final loadedRows = ledger.valueOrNull ?? const <CoreVendorLedgerEntry>[];
+    final txns = loadedRows.where((r) => r.isTransaction).toList();
+    final selectedRows = txns.where((r) => _selected.contains(r.id)).toList();
+
+    final canPrice = selectedRows.isNotEmpty &&
+        selectedRows.every((r) => r.status == 'needs_pricing') &&
+        selectedRows.every((r) => r.stage == selectedRows.first.stage);
+    final canApprove = selectedRows.isNotEmpty && selectedRows.every((r) => r.status == 'unapproved');
+    final canPay = selectedRows.isNotEmpty && selectedRows.every((r) => r.status == 'approved');
+    final payTotal = selectedRows.fold<double>(0, (s, r) => s + (r.amount ?? 0));
+
+    return AppPage(
+      title: widget.vendorName ?? 'Vendor',
+      actions: const [ThemeButton()],
+      padded: false,
+      bottomBar: _selected.isEmpty
+          ? null
+          : _SelectionBar(
+              count: _selected.length,
+              total: payTotal,
+              busy: _busy,
+              canPrice: canPrice,
+              canApprove: canApprove,
+              canPay: canPay,
+              onClear: () => setState(() => _selected.clear()),
+              onPrice: () => _priceSelected(selectedRows),
+              onApprove: () => _approveSelected(selectedRows),
+              onPay: () => _paySelected(selectedRows),
+            ),
       body: AsyncView(
         value: ledger,
         onRetry: () => ref.invalidate(vendorLedgerProvider(widget.vendorId)),
         data: (rows) {
-          final txns = rows.where((r) => r.isTransaction).toList();
-          final selectedRows = txns.where((r) => _selected.contains(r.id)).toList();
-
-          final canPrice = selectedRows.isNotEmpty &&
-              selectedRows.every((r) => r.status == 'needs_pricing') &&
-              selectedRows.every((r) => r.stage == selectedRows.first.stage);
-          final canApprove = selectedRows.isNotEmpty && selectedRows.every((r) => r.status == 'unapproved');
-          final canPay = selectedRows.isNotEmpty && selectedRows.every((r) => r.status == 'approved');
-          final payTotal = selectedRows.fold<double>(0, (s, r) => s + (r.amount ?? 0));
-
-          return Column(
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
             children: [
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+              SectionHeader(
+                'Ledger',
+                trailing: AppButton.ghost(
+                  label: 'Record payment',
+                  icon: Icons.add,
+                  onPressed: _busy ? null : _recordPayment,
+                ),
+              ),
+              if (rows.isEmpty)
+                const EmptyState(title: 'Nothing recorded yet.', icon: Icons.receipt_long_outlined, compact: true)
+              else
+                AppListGroup(
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('Ledger', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: p.text)),
-                        TextButton.icon(
-                          onPressed: _busy ? null : _recordPayment,
-                          icon: const Icon(Icons.add, size: 18),
-                          label: const Text('Record payment'),
+                    for (final e in rows)
+                      _LedgerRow(entry: e, selected: _selected, onToggle: () => _toggleSelected(e.id)),
+                  ],
+                ),
+              const SectionHeader('Damaged Thaans', top: 24),
+              AsyncView(
+                value: damaged,
+                onRetry: () => ref.invalidate(vendorDamagedProvider(widget.vendorId)),
+                isEmpty: (rows) => rows.isEmpty,
+                emptyMessage: 'Nothing flagged damaged for this vendor.',
+                data: (rows) => Column(
+                  children: [
+                    for (final d in rows)
+                      _DamagedRow(
+                        entry: d,
+                        busy: _busy,
+                        onAddress: () => _run(
+                          () => ref.read(vendorRepositoryProvider).addressDamaged(d.id),
+                          okMessage: 'Marked addressed.',
                         ),
-                      ],
-                    ),
-                    if (rows.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 24),
-                        child: Text('Nothing recorded yet.', style: TextStyle(color: p.textSecondary)),
-                      )
-                    else
-                      for (final e in rows)
-                        _LedgerRow(entry: e, selected: _selected, onToggle: () => _toggleSelected(e.id)),
-                    const SizedBox(height: 24),
-                    Text('Damaged Thaans', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: p.text)),
-                    const SizedBox(height: 6),
-                    AsyncView(
-                      value: damaged,
-                      onRetry: () => ref.invalidate(vendorDamagedProvider(widget.vendorId)),
-                      isEmpty: (rows) => rows.isEmpty,
-                      emptyMessage: 'Nothing flagged damaged for this vendor.',
-                      data: (rows) => Column(
-                        children: [
-                          for (final d in rows)
-                            _DamagedRow(
-                              entry: d,
-                              busy: _busy,
-                              onAddress: () => _run(
-                                () => ref.read(vendorRepositoryProvider).addressDamaged(d.id),
-                                okMessage: 'Marked addressed.',
-                              ),
-                              onWriteOff: () => _run(
-                                () => ref.read(vendorRepositoryProvider).writeOffDamaged(d.id),
-                                okMessage: 'Written off.',
-                              ),
-                            ),
-                        ],
+                        onWriteOff: () => _writeOff(d),
                       ),
-                    ),
                   ],
                 ),
               ),
-              if (_selected.isNotEmpty)
-                _SelectionBar(
-                  count: _selected.length,
-                  total: payTotal,
-                  busy: _busy,
-                  canPrice: canPrice,
-                  canApprove: canApprove,
-                  canPay: canPay,
-                  onClear: () => setState(() => _selected.clear()),
-                  onPrice: () => _priceSelected(selectedRows),
-                  onApprove: () => _approveSelected(selectedRows),
-                  onPay: () => _paySelected(selectedRows),
-                ),
             ],
           );
         },
@@ -220,74 +228,52 @@ class _LedgerRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
     final isSel = selected.contains(entry.id);
-    return InkWell(
-      onTap: entry.isTransaction ? onToggle : null,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSel ? p.primary.withValues(alpha: 0.08) : p.surface2,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: isSel ? p.primary : p.border),
-        ),
-        child: Row(
+
+    final title = entry.isTransaction
+        ? '${entry.stage} · ${entry.pieceCount} pcs'
+        : 'Payment${entry.notes != null ? " — ${entry.notes}" : ""}';
+    final subtitle = entry.baleCodes != null && entry.baleCodes!.isNotEmpty
+        ? '${entry.date} · Bale ${entry.baleCodes!.join(", ")}'
+        : entry.date;
+
+    // The row itself has no "selected" look, so the tint sits behind it.
+    return ColoredBox(
+      color: isSel ? p.primary.withValues(alpha: 0.08) : Colors.transparent,
+      child: AppListRow(
+        onTap: entry.isTransaction ? onToggle : null,
+        title: title,
+        subtitle: subtitle,
+        leading: entry.isTransaction
+            ? Icon(
+                isSel ? Icons.check_box : Icons.check_box_outline_blank,
+                size: 22,
+                color: isSel ? p.primary : p.textMuted,
+              )
+            : null,
+        trailing: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (entry.isTransaction)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Icon(
-                  isSel ? Icons.check_box : Icons.check_box_outline_blank,
-                  size: 20,
-                  color: isSel ? p.primary : p.textMuted,
-                ),
-              ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    entry.isTransaction
-                        ? '${entry.stage} · ${entry.pieceCount} pcs'
-                        : 'Payment${entry.notes != null ? " — ${entry.notes}" : ""}',
-                    style: TextStyle(fontWeight: FontWeight.w600, color: p.text, fontSize: 13.5),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    entry.baleCodes != null && entry.baleCodes!.isNotEmpty
-                        ? '${entry.date} · Bale ${entry.baleCodes!.join(", ")}'
-                        : entry.date,
-                    style: TextStyle(color: p.textSecondary, fontSize: 11.5),
-                  ),
-                ],
+            Text(
+              entry.amount == null
+                  ? 'Not priced'
+                  : '${entry.isTransaction ? "+" : "−"}₹${entry.amount!.toStringAsFixed(0)}',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+                fontStyle: entry.amount == null ? FontStyle.italic : FontStyle.normal,
+                fontFeatures: const [FontFeature.tabularFigures()],
+                color: entry.amount == null
+                    ? p.textMuted
+                    : entry.isTransaction
+                        ? p.danger
+                        : p.success,
               ),
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  entry.amount == null
-                      ? 'Not priced'
-                      : '${entry.isTransaction ? "+" : "−"}₹${entry.amount!.toStringAsFixed(0)}',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                    fontStyle: entry.amount == null ? FontStyle.italic : FontStyle.normal,
-                    color: entry.amount == null
-                        ? p.textMuted
-                        : entry.isTransaction
-                            ? p.danger
-                            : p.success,
-                  ),
-                ),
-                if (entry.isTransaction) ...[
-                  const SizedBox(height: 3),
-                  StatusChip(
-                    label: vendorTxnStatusLabel(entry.status),
-                    color: vendorTxnStatusColor(context, entry.status),
-                  ),
-                ],
-              ],
-            ),
+            if (entry.isTransaction) ...[
+              const SizedBox(height: 4),
+              vendorTxnStatusBadge(entry.status),
+            ],
           ],
         ),
       ),
@@ -305,50 +291,40 @@ class _DamagedRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: p.surface2, borderRadius: BorderRadius.circular(10), border: Border.all(color: p.border)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  '${entry.thaanCode ?? "no code yet"} · Bale ${entry.baleCode}${entry.stage != null ? " · ${entry.stage}" : ""}',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: p.text),
-                ),
-              ),
-              StatusChip(label: damagedStatusLabel(entry.status), color: damagedStatusColor(context, entry.status)),
-            ],
-          ),
-          const SizedBox(height: 3),
-          Text(
-            'Flagged ${entry.flaggedAt}${entry.flaggedByName != null ? " by ${entry.flaggedByName}" : ""}',
-            style: TextStyle(color: p.textSecondary, fontSize: 11.5),
-          ),
-          if (entry.notes != null && entry.notes!.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(entry.notes!, style: TextStyle(color: p.textSecondary, fontSize: 12.5)),
-          ],
-          if (entry.status != 'written_off') ...[
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton(
-                onPressed: busy ? null : (entry.status == 'flagged' ? onAddress : onWriteOff),
-                child: Text(entry.status == 'flagged' ? 'Mark addressed' : 'Write off'),
-              ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: AppCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CardTitle(
+              '${entry.thaanCode ?? "no code yet"} · Bale ${entry.baleCode}${entry.stage != null ? " · ${entry.stage}" : ""}',
+              subtitle: 'Flagged ${entry.flaggedAt}${entry.flaggedByName != null ? " by ${entry.flaggedByName}" : ""}',
+              trailing: damagedStatusBadge(entry.status),
             ),
+            if (entry.notes != null && entry.notes!.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(entry.notes!, style: TextStyle(color: p.textSecondary, fontSize: 12.5)),
+            ],
+            if (entry.status != 'written_off') ...[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: entry.status == 'flagged'
+                    ? AppButton.secondary(label: 'Mark addressed', expand: false, onPressed: busy ? null : onAddress)
+                    : AppButton.danger(label: 'Write off', expand: false, onPressed: busy ? null : onWriteOff),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
 }
 
+/// What the selection can have done to it, pinned at the bottom. One
+/// action at a time — Price, Approve or Pay, whichever the whole selection
+/// qualifies for — beside Clear; just Clear when it qualifies for nothing.
 class _SelectionBar extends StatelessWidget {
   const _SelectionBar({
     required this.count,
@@ -375,33 +351,19 @@ class _SelectionBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
-    return SafeArea(
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        decoration: BoxDecoration(
-          color: p.surface2,
-          border: Border(top: BorderSide(color: p.border)),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                '$count selected · ₹${total.toStringAsFixed(0)}',
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5, color: p.text),
-              ),
-            ),
-            TextButton(onPressed: onClear, child: const Text('Clear')),
-            if (canPrice)
-              FilledButton.tonal(onPressed: busy ? null : onPrice, child: const Text('Price'))
-            else if (canApprove)
-              FilledButton.tonal(onPressed: busy ? null : onApprove, child: const Text('Approve'))
-            else if (canPay)
-              FilledButton(onPressed: busy ? null : onPay, child: const Text('Pay')),
-          ],
-        ),
-      ),
-    );
+    final note = '$count selected · ₹${total.toStringAsFixed(0)}';
+    final clear = AppButton.secondary(label: 'Clear', onPressed: onClear);
+
+    final AppButton? action = canPrice
+        ? AppButton.primary(label: 'Price', busy: busy, onPressed: onPrice)
+        : canApprove
+            ? AppButton.primary(label: 'Approve', busy: busy, onPressed: onApprove)
+            : canPay
+                ? AppButton.primary(label: 'Pay', busy: busy, onPressed: onPay)
+                : null;
+
+    if (action == null) return BottomActionBar(note: note, primary: clear);
+    return BottomActionBar(note: note, secondary: clear, primary: action);
   }
 }
 
@@ -424,40 +386,27 @@ class _RateSheetState extends State<_RateSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
     final pieces = widget.entries.fold<int>(0, (s, e) => s + (e.pieceCount ?? 0));
     final rateValue = double.tryParse(_rate.text);
     final preview = rateValue != null ? rateValue * pieces : null;
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 20, 16, MediaQuery.of(context).viewInsets.bottom + 16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Price ${widget.entries.length} transaction${widget.entries.length == 1 ? "" : "s"}',
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-          const SizedBox(height: 4),
-          Text('${widget.entries.first.stage} · $pieces piece${pieces == 1 ? "" : "s"} total.',
-              style: TextStyle(color: p.textSecondary)),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _rate,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            autofocus: true,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(labelText: 'Rate per piece (₹)', border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: rateValue == null || rateValue < 0 ? null : () => Navigator.pop(context, rateValue),
-              child: Text(preview != null ? 'Price ₹${preview.toStringAsFixed(0)}' : 'Price'),
-            ),
-          ),
-        ],
-      ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AppTextField(
+          label: 'Rate per piece (₹)',
+          controller: _rate,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          autofocus: true,
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 16),
+        AppButton.primary(
+          label: preview != null ? 'Price ₹${preview.toStringAsFixed(0)}' : 'Price',
+          onPressed: rateValue == null || rateValue < 0 ? null : () => Navigator.pop(context, rateValue),
+        ),
+      ],
     );
   }
 }
@@ -478,12 +427,13 @@ class _PaySheet extends StatefulWidget {
 }
 
 class _PaySheetState extends State<_PaySheet> {
-  late String _paidOn = DateTime.now().toIso8601String().substring(0, 10);
+  late final _paidOn = TextEditingController(text: DateTime.now().toIso8601String().substring(0, 10));
   final _method = TextEditingController();
   final _notes = TextEditingController();
 
   @override
   void dispose() {
+    _paidOn.dispose();
     _method.dispose();
     _notes.dispose();
     super.dispose();
@@ -492,53 +442,39 @@ class _PaySheetState extends State<_PaySheet> {
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.tryParse(_paidOn) ?? DateTime.now(),
+      initialDate: DateTime.tryParse(_paidOn.text) ?? DateTime.now(),
       firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 1)),
     );
-    if (picked != null) setState(() => _paidOn = picked.toIso8601String().substring(0, 10));
+    if (picked != null) setState(() => _paidOn.text = picked.toIso8601String().substring(0, 10));
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 20, 16, MediaQuery.of(context).viewInsets.bottom + 16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Pay ₹${widget.total.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-          const SizedBox(height: 16),
-          InkWell(
-            onTap: _pickDate,
-            child: InputDecorator(
-              decoration: const InputDecoration(labelText: 'Date', border: OutlineInputBorder()),
-              child: Text(_paidOn),
-            ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AppTextField(
+          label: 'Date',
+          controller: _paidOn,
+          readOnly: true,
+          onTap: _pickDate,
+          suffix: const Icon(Icons.calendar_today_outlined),
+        ),
+        const SizedBox(height: 12),
+        AppTextField(label: 'Method', controller: _method, hint: 'Cash, bank transfer — optional'),
+        const SizedBox(height: 12),
+        AppTextField(label: 'Notes', controller: _notes),
+        const SizedBox(height: 16),
+        AppButton.primary(
+          label: 'Pay ₹${widget.total.toStringAsFixed(0)}',
+          onPressed: () => Navigator.pop(
+            context,
+            _PayDraft(paidOn: _paidOn.text, method: _method.text.trim(), notes: _notes.text.trim()),
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _method,
-            decoration: const InputDecoration(labelText: 'Method', hintText: 'Cash, bank transfer — optional', border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _notes,
-            decoration: const InputDecoration(labelText: 'Notes', border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: () => Navigator.pop(
-                context,
-                _PayDraft(paidOn: _paidOn, method: _method.text.trim(), notes: _notes.text.trim()),
-              ),
-              child: Text('Pay ₹${widget.total.toStringAsFixed(0)}'),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -560,13 +496,14 @@ class _RecordPaymentSheet extends StatefulWidget {
 
 class _RecordPaymentSheetState extends State<_RecordPaymentSheet> {
   final _amount = TextEditingController();
-  late String _paidOn = DateTime.now().toIso8601String().substring(0, 10);
+  late final _paidOn = TextEditingController(text: DateTime.now().toIso8601String().substring(0, 10));
   final _method = TextEditingController();
   final _notes = TextEditingController();
 
   @override
   void dispose() {
     _amount.dispose();
+    _paidOn.dispose();
     _method.dispose();
     _notes.dispose();
     super.dispose();
@@ -575,73 +512,54 @@ class _RecordPaymentSheetState extends State<_RecordPaymentSheet> {
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.tryParse(_paidOn) ?? DateTime.now(),
+      initialDate: DateTime.tryParse(_paidOn.text) ?? DateTime.now(),
       firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 1)),
     );
-    if (picked != null) setState(() => _paidOn = picked.toIso8601String().substring(0, 10));
+    if (picked != null) setState(() => _paidOn.text = picked.toIso8601String().substring(0, 10));
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 20, 16, MediaQuery.of(context).viewInsets.bottom + 16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Record payment', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-          const SizedBox(height: 4),
-          Text(
-            "Against this vendor's running balance — not tied to any particular transaction.",
-            style: TextStyle(color: context.p.textSecondary, fontSize: 12.5),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _amount,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            autofocus: true,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(labelText: 'Amount (₹)', border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 12),
-          InkWell(
-            onTap: _pickDate,
-            child: InputDecorator(
-              decoration: const InputDecoration(labelText: 'Date', border: OutlineInputBorder()),
-              child: Text(_paidOn),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _method,
-            decoration: const InputDecoration(labelText: 'Method', hintText: 'Cash, bank transfer — optional', border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _notes,
-            decoration: const InputDecoration(labelText: 'Notes', border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: _amount.text.trim().isEmpty
-                  ? null
-                  : () => Navigator.pop(
-                        context,
-                        _RecordPaymentDraft(
-                          amount: _amount.text.trim(),
-                          paidOn: _paidOn,
-                          method: _method.text.trim(),
-                          notes: _notes.text.trim(),
-                        ),
-                      ),
-              child: const Text('Add payment'),
-            ),
-          ),
-        ],
-      ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AppTextField(
+          label: 'Amount (₹)',
+          controller: _amount,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          autofocus: true,
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 12),
+        AppTextField(
+          label: 'Date',
+          controller: _paidOn,
+          readOnly: true,
+          onTap: _pickDate,
+          suffix: const Icon(Icons.calendar_today_outlined),
+        ),
+        const SizedBox(height: 12),
+        AppTextField(label: 'Method', controller: _method, hint: 'Cash, bank transfer — optional'),
+        const SizedBox(height: 12),
+        AppTextField(label: 'Notes', controller: _notes),
+        const SizedBox(height: 16),
+        AppButton.primary(
+          label: 'Add payment',
+          onPressed: _amount.text.trim().isEmpty
+              ? null
+              : () => Navigator.pop(
+                    context,
+                    _RecordPaymentDraft(
+                      amount: _amount.text.trim(),
+                      paidOn: _paidOn.text,
+                      method: _method.text.trim(),
+                      notes: _notes.text.trim(),
+                    ),
+                  ),
+        ),
+      ],
     );
   }
 }

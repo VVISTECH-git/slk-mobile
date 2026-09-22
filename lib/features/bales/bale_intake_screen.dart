@@ -4,10 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
-import '../../widgets/picker_field.dart';
-import '../../widgets/theme_button.dart';
+import '../../widgets/ui/ui.dart';
 import 'bale_providers.dart';
 
 /// Kora to Shelf, step one: log a bale of raw cloth as it arrives.
@@ -125,30 +122,36 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
     final suppliers = ref.watch(coreSuppliersProvider);
     final items = ref.watch(coreClothItemsProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Bale Intake'),
-        actions: [
-          const ThemeButton(),
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: () {
-              ref.invalidate(coreSuppliersProvider);
-              ref.invalidate(coreClothItemsProvider);
-            },
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
+    return AppPage(
+      title: 'Bale Intake',
+      actions: [
+        const ThemeButton(),
+        AppIconButton(
+          icon: Icons.refresh,
+          tooltip: 'Refresh',
+          onPressed: () {
+            ref.invalidate(coreSuppliersProvider);
+            ref.invalidate(coreClothItemsProvider);
+          },
+        ),
+      ],
+      padded: false,
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         children: [
           _SupplierField(suppliers: suppliers, value: _supplierId, onChanged: (v) => setState(() => _supplierId = v)),
           const SizedBox(height: 12),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: _DateField(label: 'Bill entry date', value: _billEntryDate, onTap: () => _pickDate(_billEntryDate, (d) => setState(() => _billEntryDate = d)))),
+              Expanded(
+                child: _DateField(
+                  label: 'Bill entry date',
+                  value: _billEntryDate,
+                  onTap: () => _pickDate(_billEntryDate, (d) => setState(() => _billEntryDate = d)),
+                ),
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: PickerField(
@@ -165,21 +168,31 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: TextField(
+                child: AppTextField(
+                  label: 'Bill No',
                   controller: _invoiceNumber,
-                  decoration: const InputDecoration(labelText: 'Bill No', helperText: "Blank if it hasn't arrived."),
+                  helper: "Blank if it hasn't arrived.",
                 ),
               ),
               const SizedBox(width: 12),
-              Expanded(child: _DateField(label: 'Bill Date', value: _invoiceDate, onTap: () => _pickDate(_invoiceDate ?? DateTime.now(), (d) => setState(() => _invoiceDate = d)), optional: true)),
+              Expanded(
+                child: _DateField(
+                  label: 'Bill Date',
+                  value: _invoiceDate,
+                  optional: true,
+                  onTap: () => _pickDate(_invoiceDate ?? DateTime.now(), (d) => setState(() => _invoiceDate = d)),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
+          AppTextField(
+            label: 'Bill amount',
             controller: _invoiceAmount,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-            decoration: const InputDecoration(labelText: 'Bill amount', prefixText: '₹ ', helperText: "The bill's own total."),
+            prefixText: '₹ ',
+            helper: "The bill's own total.",
           ),
           const Divider(height: 32),
           Row(
@@ -187,11 +200,12 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
             children: [
               Expanded(
                 flex: 2,
-                child: TextField(
+                child: AppTextField(
+                  label: 'Quantity received',
+                  required: true,
                   controller: _metresReceived,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-                  decoration: const InputDecoration(labelText: 'Quantity received *'),
                 ),
               ),
               const SizedBox(width: 12),
@@ -206,11 +220,11 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
+          AppTextField(
+            label: 'Number of bales',
             controller: _baleCount,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: const InputDecoration(labelText: 'Number of bales'),
           ),
           const SizedBox(height: 12),
           Row(
@@ -222,32 +236,29 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: TextField(
+                child: AppTextField(
+                  label: 'Code',
                   controller: _gradeCode,
-                  decoration: const InputDecoration(labelText: 'Code', helperText: 'identifier'),
+                  helper: 'identifier',
                 ),
               ),
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
+          AppTextField(
+            label: 'Remarks',
             controller: _notes,
             maxLines: 2,
-            decoration: const InputDecoration(labelText: 'Remarks', helperText: 'Anything else worth recording.'),
+            helper: 'Anything else worth recording.',
           ),
         ],
       ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: FilledButton.icon(
-            onPressed: _busy ? null : _save,
-            icon: _busy
-                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Icon(Icons.add_box_outlined),
-            label: Text(_busy ? 'Saving…' : 'Save bale'),
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-          ),
+      bottomBar: BottomActionBar(
+        primary: AppButton.primary(
+          label: 'Save bale',
+          icon: Icons.add_box_outlined,
+          busy: _busy,
+          onPressed: _save,
         ),
       ),
     );
@@ -264,8 +275,8 @@ class _SupplierField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return suppliers.when(
-      loading: () => const LinearProgressIndicator(),
-      error: (e, _) => Text('$e', style: TextStyle(color: context.p.danger)),
+      loading: () => const Skeleton(height: 48, radius: 12),
+      error: (e, _) => InlineNotice('$e', icon: Icons.cloud_off_outlined, warning: true),
       data: (rows) => PickerField(
         label: 'Supplier',
         value: value,
@@ -289,8 +300,8 @@ class _ItemField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return items.when(
-      loading: () => const LinearProgressIndicator(),
-      error: (e, _) => Text('$e', style: TextStyle(color: context.p.danger)),
+      loading: () => const Skeleton(height: 48, radius: 12),
+      error: (e, _) => InlineNotice('$e', icon: Icons.cloud_off_outlined, warning: true),
       data: (rows) => PickerField(
         label: 'Item',
         value: value,
@@ -304,6 +315,8 @@ class _ItemField extends StatelessWidget {
   }
 }
 
+/// A tappable date box with the same label-above shape as [AppTextField],
+/// so a date and a text field side by side line up.
 class _DateField extends StatelessWidget {
   const _DateField({required this.label, required this.value, required this.onTap, this.optional = false});
 
@@ -314,16 +327,31 @@ class _DateField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: onTap,
-      child: InputDecorator(
-        decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), suffixIcon: const Icon(Icons.calendar_today, size: 18)),
-        child: Text(
-          value == null ? (optional ? 'Not yet' : 'Choose…') : DateFormat('d MMM yyyy').format(value!),
-          style: TextStyle(color: value == null ? context.p.textMuted : context.p.text, fontWeight: value == null ? FontWeight.w400 : FontWeight.w600),
+    final p = context.p;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FieldLabel(label),
+        const SizedBox(height: 6),
+        InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: InputDecorator(
+            decoration: InputDecoration(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              suffixIcon: Icon(Icons.calendar_today, size: 18, color: p.textSecondary),
+            ),
+            child: Text(
+              value == null ? (optional ? 'Not yet' : 'Choose…') : DateFormat('d MMM yyyy').format(value!),
+              style: TextStyle(
+                fontSize: 16,
+                color: value == null ? p.textMuted : p.text,
+                fontWeight: value == null ? FontWeight.w400 : FontWeight.w600,
+              ),
+            ),
+          ),
         ),
-      ),
+      ],
     );
   }
 }

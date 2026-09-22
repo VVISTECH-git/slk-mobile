@@ -4,9 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
 import '../../models/core.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
-import '../../widgets/picker_field.dart';
+import '../../widgets/ui/ui.dart';
 import 'core_auth.dart';
 import 'new_record_screen.dart';
 import 'record_fields.dart';
@@ -260,22 +258,27 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
     final options = ref.watch(coreOptionsProvider);
     final locations = ref.watch(coreLocationsProvider);
     final actor = ref.watch(coreAuthProvider).actor;
+    final p = context.p;
 
+    // Kept as a Scaffold rather than an AppPage: the library's header has no
+    // room for a TabBar, and seven tabs are the whole shape of this screen.
     return DefaultTabController(
       length: 7,
       child: Scaffold(
-        backgroundColor: context.p.surface1,
+        backgroundColor: p.surface1,
         appBar: AppBar(
           title: _Title(code: _displayCode, designCode: _current?.code),
           actions: [
-            IconButton(
+            AppIconButton(
+              icon: Icons.copy_outlined,
               tooltip: 'Duplicate as a new colourway',
-              icon: const Icon(Icons.copy_outlined),
+              color: p.onAppBar,
               onPressed: _current == null ? null : _duplicate,
             ),
-            IconButton(
+            AppIconButton(
+              icon: Icons.photo_camera_outlined,
               tooltip: 'Photographs',
-              icon: const Icon(Icons.photo_camera_outlined),
+              color: p.onAppBar,
               onPressed: _current == null ? null : _openPhotos,
             ),
             // Desk work, by this app's own reasoning (see core_home_screen's
@@ -285,11 +288,13 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
             // hiding the icon here is a courtesy, not the enforcement.
             if (actor != null &&
                 (actor.role == 'office' || actor.role == 'owner'))
-              IconButton(
+              AppIconButton(
+                icon: Icons.archive_outlined,
                 tooltip: 'Archive or delete',
-                icon: const Icon(Icons.archive_outlined),
+                color: p.onAppBar,
                 onPressed: _current == null ? null : _archive,
               ),
+            const SizedBox(width: 6),
           ],
           bottom: TabBar(
             // Seven tabs since Publish joined the other six — the fixed
@@ -301,9 +306,9 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
             // screen edge — invisible at rest, with nothing on screen saying
             // a swipe would reveal it. Same fix as the create screen's.
             padding: const EdgeInsets.only(right: 44),
-            labelColor: context.p.onAppBar,
-            unselectedLabelColor: context.p.onAppBar.withValues(alpha: 0.72),
-            indicatorColor: context.p.onAppBar,
+            labelColor: p.onAppBar,
+            unselectedLabelColor: p.onAppBar.withValues(alpha: 0.72),
+            indicatorColor: p.onAppBar,
             labelPadding: const EdgeInsets.symmetric(horizontal: 12),
             labelStyle:
                 const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
@@ -335,10 +340,10 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
               future: _record,
               builder: (context, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  return const LoadingState(message: 'Loading the record…');
                 }
                 if (snap.hasError) {
-                  return _Retry(
+                  return ErrorState(
                     message: '${snap.error}',
                     onRetry: () => setState(() {
                       _record = _load();
@@ -526,26 +531,23 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
         ),
         const SizedBox(height: 8),
         RecordFieldWrap(
-          error: fieldErrors['quantity'],
-          child: TextField(
+          child: AppTextField(
+            label: uom == null
+                ? 'Quantity on hand'
+                : 'Quantity on hand ($uom)',
             controller: _quantity,
             focusNode: _quantityFocus,
             enabled: !record.isSerialised,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            hint: '${stock.onHand}',
+            helper: record.isSerialised
+                ? 'Serialised — the count is how many pieces are tagged, so '
+                    'it changes piece by piece.'
+                : null,
+            error: fieldErrors['quantity'],
             onChanged: (_) => setState(
               () => fieldErrors = {...fieldErrors}..remove('quantity'),
-            ),
-            decoration: InputDecoration(
-              labelText: uom == null
-                  ? 'Quantity on hand'
-                  : 'Quantity on hand ($uom)',
-              hintText: '${stock.onHand}',
-              border: const OutlineInputBorder(),
-              helperText: record.isSerialised
-                  ? 'Serialised — the count is how many pieces are tagged, so '
-                      'it changes piece by piece.'
-                  : null,
             ),
           ),
         ),
@@ -659,28 +661,20 @@ class _StockTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
 
-    return Container(
+    return AppCard(
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: p.border),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(label,
-              style: TextStyle(fontSize: 11, color: p.textSecondary)),
-          Text(
-            '$value',
-            style: TextStyle(
-              fontSize: 19,
-              fontWeight: FontWeight.w700,
-              color: label == 'Damaged' && value > 0 ? p.danger : p.text,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
+          StatTile(
+            value: '$value',
+            label: label,
+            tone: label == 'Damaged' && value > 0
+                ? BadgeTone.danger
+                : BadgeTone.neutral,
           ),
+          const SizedBox(height: 2),
           Text(detail,
               style: TextStyle(fontSize: 10, color: p.textMuted),
               maxLines: 1,
@@ -702,60 +696,13 @@ class _LocationTable extends StatelessWidget {
     final p = context.p;
     final total = rows.fold<int>(0, (sum, r) => sum + r.qty);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: p.border),
-      ),
+    return AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Column(
         children: [
-          for (final r in rows)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(r.location,
-                        style: TextStyle(fontSize: 13, color: p.textSecondary)),
-                  ),
-                  Text(
-                    '${r.qty} $unit',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: p.surface3,
-              borderRadius:
-                  const BorderRadius.vertical(bottom: Radius.circular(9)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text('Total',
-                      style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: p.text)),
-                ),
-                Text(
-                  '$total $unit',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ],
-            ),
-          ),
+          for (final r in rows) KeyValueRow(r.location, '${r.qty} $unit'),
+          Divider(height: 12, thickness: 1, color: p.border),
+          KeyValueRow('Total', '$total $unit', strong: true),
         ],
       ),
     );
@@ -771,61 +718,46 @@ class _ConsignmentCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.p;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: p.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                consignment.code,
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: p.primary,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-              const Spacer(),
-              Text(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: AppCard(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CardTitle(
+              consignment.code,
+              subtitle: [
+                consignment.receivedAt,
+                if (consignment.reference != null) consignment.reference!,
+              ].join(' · '),
+              trailing: StatusBadge(
                 '${consignment.qty} · ${consignment.location ?? "gone"}',
-                style: TextStyle(fontSize: 12, color: p.textSecondary),
+                tone: consignment.location == null
+                    ? BadgeTone.neutral
+                    : BadgeTone.success,
+              ),
+            ),
+            if (consignment.items.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  for (final item in consignment.items)
+                    Text(
+                      item,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: p.textSecondary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                ],
               ),
             ],
-          ),
-          const SizedBox(height: 2),
-          Text(
-            [
-              consignment.receivedAt,
-              if (consignment.reference != null) consignment.reference!,
-            ].join(' · '),
-            style: TextStyle(fontSize: 11.5, color: p.textMuted),
-          ),
-          if (consignment.items.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: [
-                for (final item in consignment.items)
-                  Text(
-                    item,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: p.textSecondary,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-              ],
-            ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1001,7 +933,6 @@ class _RecordMovementFormState extends ConsumerState<_RecordMovementForm> {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
     final isTransfer = _kind == 'transferred';
 
     return Column(
@@ -1048,52 +979,39 @@ class _RecordMovementFormState extends ConsumerState<_RecordMovementForm> {
             ),
           ),
         RecordFieldWrap(
-          child: TextField(
+          child: AppTextField(
+            label: widget.uom == null ? 'How many' : 'How many (${widget.uom})',
             controller: _qty,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: InputDecoration(
-              labelText: widget.uom == null ? 'How many' : 'How many (${widget.uom})',
-              border: const OutlineInputBorder(),
-            ),
           ),
         ),
         RecordFieldWrap(
-          child: TextField(
+          child: AppTextField(
+            label: 'Reference',
+            hint: 'Invoice or challan number',
             controller: _reference,
-            decoration: const InputDecoration(
-              labelText: 'Reference',
-              hintText: 'Invoice or challan number',
-              border: OutlineInputBorder(),
-            ),
           ),
         ),
         RecordFieldWrap(
-          child: TextField(
+          child: AppTextField(
+            label: 'Note',
             controller: _note,
-            decoration: const InputDecoration(
-              labelText: 'Note',
-              border: OutlineInputBorder(),
-            ),
           ),
         ),
         if (_error != null)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(_error!, style: TextStyle(fontSize: 12, color: p.danger)),
+            padding: const EdgeInsets.only(bottom: 10),
+            child: InlineNotice(_error!, icon: Icons.error_outline, warning: true),
           ),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: _busy ? null : _submit,
-            child: _busy
-                ? const SizedBox(
-                    height: 18,
-                    width: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Record'),
-          ),
+        // Secondary, not primary: the screen's one primary action is "Save
+        // changes" in the pinned bar, and two loud buttons on one tab would
+        // ask which of them files the record.
+        AppButton.secondary(
+          label: 'Record',
+          icon: Icons.playlist_add_outlined,
+          busy: _busy,
+          onPressed: _submit,
         ),
       ],
     );
@@ -1108,55 +1026,51 @@ class _MovementCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    final kindLabel = _movementKinds
-        .firstWhere(
-          (k) => k.key == movement.kind,
-          orElse: () => (key: movement.kind, label: movement.kind, dir: 'in'),
-        )
-        .label;
+    final kind = _movementKinds.firstWhere(
+      (k) => k.key == movement.kind,
+      orElse: () => (key: movement.kind, label: movement.kind, dir: 'in'),
+    );
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: p.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                kindLabel,
-                style: TextStyle(fontWeight: FontWeight.w700, color: p.text),
-              ),
-              const Spacer(),
-              Text(
-                '${movement.qty}',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontFeatures: const [FontFeature.tabularFigures()],
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: AppCard(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                StatusBadge(
+                  kind.label,
+                  tone: kind.dir == 'in' ? BadgeTone.success : BadgeTone.warning,
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 2),
-          Text(
-            [
-              if (movement.from != null && movement.to != null)
-                '${movement.from} → ${movement.to}'
-              else if (movement.to != null)
-                'into ${movement.to}'
-              else if (movement.from != null)
-                'out of ${movement.from}',
-              movement.occurredAt,
-              if (movement.reason != null) movement.reason!,
-            ].whereType<String>().join(' · '),
-            style: TextStyle(fontSize: 11.5, color: p.textMuted),
-          ),
-        ],
+                const Spacer(),
+                Text(
+                  '${movement.qty}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: p.text,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              [
+                if (movement.from != null && movement.to != null)
+                  '${movement.from} → ${movement.to}'
+                else if (movement.to != null)
+                  'into ${movement.to}'
+                else if (movement.from != null)
+                  'out of ${movement.from}',
+                movement.occurredAt,
+                if (movement.reason != null) movement.reason!,
+              ].whereType<String>().join(' · '),
+              style: TextStyle(fontSize: 11.5, color: p.textMuted),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1170,6 +1084,11 @@ class _MovementCard extends StatelessWidget {
 /// one. A dialog is not a permission — the server's `guard` decides what
 /// actually happens; this only decides what somebody has to click through
 /// first.
+///
+/// Not [showConfirmDialog]: that one returns a yes/no and closes, and this
+/// has to stay open through the request, show the server's refusal in place,
+/// and escalate from Archive to Delete without a second dialog. Same surface,
+/// corners and paddings, so it reads as the same dialog.
 class _ArchiveDialog extends ConsumerStatefulWidget {
   const _ArchiveDialog({required this.recordId, required this.canDelete});
 
@@ -1208,7 +1127,16 @@ class _ArchiveDialogState extends ConsumerState<_ArchiveDialog> {
     final p = context.p;
 
     return AlertDialog(
-      title: Text(_confirmingDelete ? 'Delete this record?' : 'Archive this record?'),
+      backgroundColor: p.surface2,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      titlePadding: const EdgeInsets.fromLTRB(22, 22, 22, 6),
+      contentPadding: const EdgeInsets.fromLTRB(22, 0, 22, 8),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+      title: Text(
+        _confirmingDelete ? 'Delete this record?' : 'Archive this record?',
+        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: p.text),
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1220,70 +1148,37 @@ class _ArchiveDialogState extends ConsumerState<_ArchiveDialog> {
                     'has.'
                 : 'Taken out of the active catalogue. Its stock history is '
                     'kept, and this can be undone on the web.',
+            style: TextStyle(fontSize: 14.5, height: 1.45, color: p.textSecondary),
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(_error!, style: TextStyle(color: p.danger, fontSize: 12.5)),
+            InlineNotice(_error!, icon: Icons.error_outline, warning: true),
           ],
         ],
       ),
       actions: [
-        TextButton(
+        AppButton.secondary(
+          label: 'Cancel',
+          expand: false,
           onPressed: _busy ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
         ),
         if (widget.canDelete && !_confirmingDelete)
-          TextButton(
+          AppButton.ghost(
+            label: 'Delete instead',
             onPressed:
                 _busy ? null : () => setState(() => _confirmingDelete = true),
-            child: Text('Delete instead', style: TextStyle(color: p.danger)),
           ),
-        FilledButton(
-          style: _confirmingDelete
-              ? FilledButton.styleFrom(backgroundColor: p.danger)
-              : null,
-          onPressed: _busy
-              ? null
-              : () => _confirmingDelete
-                  ? _run((api) => api.delete('/records/${widget.recordId}'))
-                  : _run((api) => api.post('/records/${widget.recordId}/archive')),
-          child: _busy
-              ? const SizedBox(
-                  height: 16,
-                  width: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Text(_confirmingDelete ? 'Delete' : 'Archive'),
+        AppButton.danger(
+          label: _confirmingDelete ? 'Delete' : 'Archive',
+          expand: false,
+          busy: _busy,
+          onPressed: () => _confirmingDelete
+              ? _run((api) => api.delete('/records/${widget.recordId}'))
+              : _run((api) => api.post('/records/${widget.recordId}/archive')),
         ),
       ],
     );
   }
-}
-
-class _Retry extends StatelessWidget {
-  const _Retry({required this.message, required this.onRetry});
-
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: context.p.textSecondary),
-              ),
-              const SizedBox(height: 16),
-              FilledButton(onPressed: onRetry, child: const Text('Try again')),
-            ],
-          ),
-        ),
-      );
 }
 
 class _ChecklistRow extends StatelessWidget {
@@ -1427,148 +1322,112 @@ class _PublishConsignmentPanelState
     final c = widget.consignment;
     final disabled = !widget.canPublish;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: p.surface2,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: p.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                c.code,
-                style: TextStyle(fontWeight: FontWeight.w700, color: p.primary),
-              ),
-              const Spacer(),
-              Text(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: AppCard(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CardTitle(
+              c.code,
+              trailing: StatusBadge(
                 '${c.qty} · ${c.location ?? "gone"}',
-                style: TextStyle(fontSize: 12, color: p.textSecondary),
+                tone: c.location == null ? BadgeTone.neutral : BadgeTone.success,
               ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          for (final ch in c.channels)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                children: [
-                  Icon(
-                    ch.isPublished ? Icons.check_circle : Icons.circle_outlined,
-                    size: 16,
-                    color: ch.isPublished ? p.success : p.textMuted,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      ch.name,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: ch.isPublished ? p.text : p.textSecondary,
+            ),
+            const SizedBox(height: 10),
+            for (final ch in c.channels)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Icon(
+                      ch.isPublished ? Icons.check_circle : Icons.circle_outlined,
+                      size: 16,
+                      color: ch.isPublished ? p.success : p.textMuted,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        ch.name,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: ch.isPublished ? p.text : p.textSecondary,
+                        ),
                       ),
                     ),
-                  ),
-                  SizedBox(
-                    height: 32,
-                    child: OutlinedButton(
+                    AppButton.secondary(
+                      label: ch.isPublished ? 'Republish' : 'Publish',
+                      expand: false,
+                      compact: true,
+                      busy: _publishing == ch.code,
                       onPressed: disabled || _publishing != null
                           ? null
                           : () => _publish(ch.code),
-                      child: _publishing == ch.code
-                          ? const SizedBox(
-                              height: 14,
-                              width: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Text(ch.isPublished ? 'Republish' : 'Publish'),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
+            const SizedBox(height: 8),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: EdgeInsets.zero,
+              title: Text(
+                'Listing overrides',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: p.text,
+                ),
+              ),
+              children: [
+                RecordFieldWrap(
+                  child: AppTextField(
+                    label: 'Title',
+                    hint: 'Blank composes it from the design',
+                    controller: _title,
+                    enabled: !disabled,
+                  ),
+                ),
+                RecordFieldWrap(
+                  child: AppTextField(
+                    label: 'Description',
+                    controller: _description,
+                    enabled: !disabled,
+                    maxLines: 4,
+                  ),
+                ),
+                RecordFieldWrap(
+                  child: AppTextField(
+                    label: 'Weight (grams)',
+                    controller: _weight,
+                    enabled: !disabled,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  ),
+                ),
+                RecordFieldWrap(
+                  child: AppTextField(
+                    label: 'HSN code',
+                    controller: _hsn,
+                    enabled: !disabled,
+                  ),
+                ),
+                AppButton.secondary(
+                  label: 'Save listing',
+                  busy: _savingListing,
+                  onPressed: disabled ? null : _saveListing,
+                ),
+              ],
             ),
-          const SizedBox(height: 8),
-          ExpansionTile(
-            tilePadding: EdgeInsets.zero,
-            childrenPadding: EdgeInsets.zero,
-            title: Text(
-              'Listing overrides',
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: p.text,
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: InlineNotice(_error!, icon: Icons.error_outline, warning: true),
               ),
-            ),
-            children: [
-              RecordFieldWrap(
-                child: TextField(
-                  controller: _title,
-                  enabled: !disabled,
-                  decoration: const InputDecoration(
-                    labelText: 'Title',
-                    hintText: 'Blank composes it from the design',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ),
-              RecordFieldWrap(
-                child: TextField(
-                  controller: _description,
-                  enabled: !disabled,
-                  minLines: 2,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                    labelText: 'Description',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ),
-              RecordFieldWrap(
-                child: TextField(
-                  controller: _weight,
-                  enabled: !disabled,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    labelText: 'Weight (grams)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ),
-              RecordFieldWrap(
-                child: TextField(
-                  controller: _hsn,
-                  enabled: !disabled,
-                  decoration: const InputDecoration(
-                    labelText: 'HSN code',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: disabled || _savingListing ? null : _saveListing,
-                  child: _savingListing
-                      ? const SizedBox(
-                          height: 16,
-                          width: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Save listing'),
-                ),
-              ),
-            ],
-          ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(_error!, style: TextStyle(fontSize: 12, color: p.danger)),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -4,8 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/config.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/async_view.dart';
+import '../../widgets/ui/ui.dart';
 import 'core_auth.dart';
 
 /// Signing in to slk-core.
@@ -114,110 +113,84 @@ class _CoreSignInScreenState extends ConsumerState<CoreSignInScreen> {
   Widget build(BuildContext context) {
     final p = context.p;
 
-    return Scaffold(
-      backgroundColor: p.surface1,
-      appBar: AppBar(title: const Text('Sign in to slk-core')),
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'The stock system',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: p.text,
-                    ),
+    return AppPage(
+      title: 'Sign in to slk-core',
+      padded: false,
+      body: Center(
+        child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'The stock system',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: p.text,
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Separate from your till sign-in. Ask the office for a code.',
-                    style: TextStyle(fontSize: 13, color: p.textSecondary),
-                  ),
-                  const SizedBox(height: 24),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Separate from your till sign-in. Ask the office for a code.',
+                  style: TextStyle(fontSize: 13, color: p.textSecondary),
+                ),
+                const SizedBox(height: 24),
 
-                  TextField(
-                    controller: _code,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    textCapitalization: TextCapitalization.none,
-                    textInputAction: TextInputAction.next,
-                    onSubmitted: (_) => _pinFocus.requestFocus(),
-                    decoration: const InputDecoration(
-                      labelText: 'Code',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
+                // A staff code must not be "corrected" into a word.
+                AppTextField(
+                  label: 'Code',
+                  controller: _code,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: (_) => _pinFocus.requestFocus(),
+                ),
+                const SizedBox(height: 14),
+
+                AppTextField(
+                  label: 'PIN',
+                  controller: _pin,
+                  focusNode: _pinFocus,
+                  obscure: true,
+                  keyboardType: TextInputType.number,
+                  // A PIN is digits; a pasted space or letter would only
+                  // spend one of the lockout's attempts.
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _busy ? null : _submit(),
+                ),
+                if (_failure != null) ...[
                   const SizedBox(height: 14),
-
-                  TextField(
-                    controller: _pin,
-                    focusNode: _pinFocus,
-                    obscureText: true,
-                    keyboardType: TextInputType.number,
-                    // A PIN is digits; a pasted space or letter would only
-                    // spend one of the lockout's attempts.
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => _busy ? null : _submit(),
-                    decoration: const InputDecoration(
-                      labelText: 'PIN',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  if (_failure != null) ...[
-                    const SizedBox(height: 14),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: p.danger.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: p.danger.withValues(alpha: 0.3)),
-                      ),
-                      child: Text(
-                        _failure!,
-                        style: TextStyle(fontSize: 12.5, color: p.danger, height: 1.4),
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: 22),
-
-                  FilledButton(
-                    onPressed: _busy ? null : _submit,
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                    child: _busy
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Sign in'),
-                  ),
-
-                  const SizedBox(height: 18),
-                  // Which server this build talks to. On a floor with a
-                  // staging handset and a live one in the same drawer, this is
-                  // the difference between a puzzling bug and an obvious one.
-                  Text(
-                    CoreConfig.baseUrl,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 11, color: p.textMuted),
-                  ),
-
-                  // No link to the till: it is retired, and an app that offers
-                  // a way into a system nobody uses is an app that has to
-                  // explain itself.
+                  InlineNotice(_failure!, icon: Icons.error_outline, warning: true),
                 ],
-              ),
+
+                const SizedBox(height: 22),
+
+                AppButton.primary(
+                  label: 'Sign in',
+                  busy: _busy,
+                  onPressed: _submit,
+                ),
+
+                const SizedBox(height: 18),
+                // Which server this build talks to. On a floor with a
+                // staging handset and a live one in the same drawer, this is
+                // the difference between a puzzling bug and an obvious one.
+                Text(
+                  CoreConfig.baseUrl,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, color: p.textMuted),
+                ),
+
+                // No link to the till: it is retired, and an app that offers
+                // a way into a system nobody uses is an app that has to
+                // explain itself.
+              ],
             ),
           ),
         ),
