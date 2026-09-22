@@ -4,8 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api_client.dart';
 import '../../models/core.dart';
 import '../../widgets/ui/ui.dart';
+import '../core/pipeline_providers.dart';
+import '../core/records_list_screen.dart' show coreRecordsProvider;
 import '../handovers/handover_providers.dart' show coreVendorsProvider;
-import '../piles/pile_providers.dart';
 import '../pos/barcode_scan_screen.dart';
 import 'thaan_providers.dart';
 
@@ -91,21 +92,19 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
     }
   }
 
-  /// Put this Thaan in a pile, or move it from the one it's in. The sheet
-  /// does the server calls and pops with the outcome; the card is looked up
-  /// again afterwards so it shows the new pile.
-  Future<void> _movePile(CoreThaan thaan, String code) async {
+  /// Put this Thaan in a record, or move it from the one it's in. The sheet
+  /// does the server call and pops with the outcome; the card is looked up
+  /// again afterwards so it shows the new record.
+  Future<void> _moveToRecord(CoreThaan thaan, String code) async {
     if (thaan.id == null) {
-      showError(context, "The server didn't say which Thaan this is — it needs updating before piles work here.");
+      showError(context, "The server didn't say which Thaan this is — it needs updating before records work here.");
       return;
     }
-    final outcome = await showAppSheet<PileAddOutcome>(
+    final outcome = await showAppSheet<AddThaansOutcome>(
       context,
-      title: thaan.pileId == null ? 'Put $code in a pile' : 'Move $code to a pile',
-      subtitle: thaan.pileId == null
-          ? 'Not in a pile yet.'
-          : 'Now in ${thaan.pileName ?? thaan.pileCode}.',
-      child: _PileMoveSheet(thaan: thaan),
+      title: thaan.colourwayId == null ? 'Put $code in a record' : 'Move $code to a record',
+      subtitle: thaan.colourwayId == null ? 'Not in a record yet.' : 'Now in ${thaan.recordLabel}.',
+      child: _RecordMoveSheet(thaan: thaan),
     );
     if (outcome == null || !mounted) return;
     if (outcome.refused.isNotEmpty) {
@@ -113,7 +112,8 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
     } else {
       showOk(context, outcome.message.isEmpty ? '$code moved.' : outcome.message);
     }
-    ref.invalidate(pilesProvider);
+    ref.invalidate(pipelineRecordsProvider);
+    ref.invalidate(coreRecordsProvider);
     await _lookup(code);
   }
 
@@ -154,7 +154,7 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
             _ThaanCard(
               thaan: _result!,
               onFlagDamaged: () => _flagDamaged(_result!, _resultCode!),
-              onPile: () => _movePile(_result!, _resultCode!),
+              onRecord: () => _moveToRecord(_result!, _resultCode!),
             ),
         ],
       ),
@@ -170,10 +170,10 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
 }
 
 class _ThaanCard extends StatelessWidget {
-  const _ThaanCard({required this.thaan, required this.onFlagDamaged, required this.onPile});
+  const _ThaanCard({required this.thaan, required this.onFlagDamaged, required this.onRecord});
   final CoreThaan thaan;
   final VoidCallback onFlagDamaged;
-  final VoidCallback onPile;
+  final VoidCallback onRecord;
 
   @override
   Widget build(BuildContext context) {
@@ -206,16 +206,14 @@ class _ThaanCard extends StatelessWidget {
           KeyValueRow('Second print', t.needsSecondPrint ? 'Yes' : 'No'),
           if (t.baleNotes != null && t.baleNotes!.isNotEmpty) KeyValueRow('Bale notes', t.baleNotes!),
           KeyValueRow('QR generated', t.qrGeneratedAt ?? 'Not yet'),
-          KeyValueRow(
-            'Pile',
-            t.pileId == null ? 'Not in a pile' : [t.pileCode, t.pileName].whereType<String>().join(' · '),
-          ),
+          KeyValueRow('Record', t.recordLabel ?? 'Not in a record'),
+          KeyValueRow('Stock', _stockLine(t), strong: t.stockStatus == 'On shelf'),
           if (t.voidedAt == null) ...[
             const SizedBox(height: 14),
             AppButton.secondary(
-              label: t.pileId == null ? 'Put in a pile' : 'Move to a pile',
-              icon: Icons.layers_outlined,
-              onPressed: onPile,
+              label: t.colourwayId == null ? 'Put in a record' : 'Move to a record',
+              icon: Icons.inventory_2_outlined,
+              onPressed: onRecord,
             ),
             const SizedBox(height: 10),
             AppButton.danger(
@@ -262,6 +260,15 @@ class _ThaanCard extends StatelessWidget {
   }
 
   static String _num(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
+
+  /// "On shelf · T00002041 · Shop · ₹2,850" — where it is, in one line.
+  /// The status leads; the rest only appears once it is a piece.
+  static String _stockLine(CoreThaan t) => [
+        t.stockStatus ?? (t.pieceCode == null ? 'In pipeline' : 'On shelf'),
+        if (t.pieceCode != null) t.pieceCode!,
+        if (t.locationName != null) t.locationName!,
+        if (t.priceMinor != null) t.price,
+      ].join(' · ');
 
   static String _baleStatusLabel(String s) => switch (s) {
         'awaiting_cutting' => 'Awaiting cutting',
@@ -360,53 +367,34 @@ class _FlagDamagedSheetState extends ConsumerState<_FlagDamagedSheet> {
   }
 }
 
-/// Which pile this Thaan goes in: one of the drafts on the server ("Move
-/// here"), or a new one made right now from a name and a colour, which the
-/// Thaan is then moved into. Pops with the server's [PileAddOutcome].
-/// Rendered inside [showAppSheet].
-class _PileMoveSheet extends ConsumerStatefulWidget {
-  const _PileMoveSheet({required this.thaan});
+/// Which record this Thaan goes in: one of the records in the pipeline,
+/// found by typing. Pops with the server's [AddThaansOutcome]. Rendered
+/// inside [showAppSheet].
+class _RecordMoveSheet extends ConsumerStatefulWidget {
+  const _RecordMoveSheet({required this.thaan});
   final CoreThaan thaan;
 
   @override
-  ConsumerState<_PileMoveSheet> createState() => _PileMoveSheetState();
+  ConsumerState<_RecordMoveSheet> createState() => _RecordMoveSheetState();
 }
 
-class _PileMoveSheetState extends ConsumerState<_PileMoveSheet> {
-  final _name = TextEditingController();
-  String? _colourId;
+class _RecordMoveSheetState extends ConsumerState<_RecordMoveSheet> {
+  final _search = TextEditingController();
+  String _query = '';
 
-  /// The pile id being moved into, or 'new' — so only that button spins.
+  /// The record id being moved into — so only that button spins.
   String? _busyFor;
 
   @override
   void dispose() {
-    _name.dispose();
+    _search.dispose();
     super.dispose();
   }
 
-  Future<void> _moveTo(String pileId) async {
-    setState(() => _busyFor = pileId);
+  Future<void> _moveTo(String recordId) async {
+    setState(() => _busyFor = recordId);
     try {
-      final outcome = await ref.read(pileRepositoryProvider).addThaans(pileId, [widget.thaan.id!]);
-      if (mounted) Navigator.pop(context, outcome);
-    } catch (e) {
-      if (mounted) showError(context, e);
-    } finally {
-      if (mounted) setState(() => _busyFor = null);
-    }
-  }
-
-  Future<void> _makeAndMove() async {
-    final name = _name.text.trim();
-    if (name.isEmpty || _colourId == null) return;
-    setState(() => _busyFor = 'new');
-    try {
-      final repo = ref.read(pileRepositoryProvider);
-      // Made at whatever stage this Thaan was last at — the closest thing
-      // to "the receive it would have been made in".
-      final made = await repo.createPile(name: name, mainColourId: _colourId!, stage: widget.thaan.lastStage);
-      final outcome = await repo.addThaans(made.id, [widget.thaan.id!]);
+      final outcome = await ref.read(pipelineRepositoryProvider).addThaans(recordId, [widget.thaan.id!]);
       if (mounted) Navigator.pop(context, outcome);
     } catch (e) {
       if (mounted) showError(context, e);
@@ -417,75 +405,59 @@ class _PileMoveSheetState extends ConsumerState<_PileMoveSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final drafts = ref.watch(pilesProvider('draft'));
-    final colours = ref.watch(pileColoursProvider);
+    final records = ref.watch(pipelineRecordsProvider('in_pipeline'));
     final busy = _busyFor != null;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SectionHeader('Draft piles', top: 0),
-        drafts.when(
+        SearchField(
+          hint: 'Code, name, colour, motif…',
+          controller: _search,
+          autofocus: true,
+          onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+        ),
+        const SizedBox(height: 12),
+        records.when(
           loading: () => const LoadingState(rows: 3),
           error: (e, _) => InlineNotice('$e', icon: Icons.cloud_off_outlined, warning: true),
           data: (rows) {
-            final offered = [for (final d in rows) if (d.id != widget.thaan.pileId) d];
-            if (offered.isEmpty) return const InlineNotice('No other draft piles right now.');
-            return AppListGroup(
-              children: [
-                for (final d in offered)
-                  AppListRow(
-                    leading: RowThumb(
-                      image: d.photoUrl == null ? null : NetworkImage(d.photoUrl!),
-                      icon: d.photoUrl == null ? Icons.layers_outlined : null,
-                    ),
-                    title: d.name,
-                    subtitle: [
-                      if (d.mainColour != null && d.mainColour!.isNotEmpty) d.mainColour!,
-                      '${d.thaanCount} Thaan${d.thaanCount == 1 ? '' : 's'}',
-                    ].join(' · '),
-                    trailing: AppButton.secondary(
-                      label: 'Move here',
-                      compact: true,
-                      expand: false,
-                      busy: _busyFor == d.id,
-                      onPressed: busy ? null : () => _moveTo(d.id),
-                    ),
+            final offered = [
+              for (final r in rows)
+                if (r.id != widget.thaan.colourwayId && (_query.isEmpty || r.haystack.contains(_query))) r,
+            ];
+            if (offered.isEmpty) {
+              return InlineNotice(
+                _query.isEmpty ? 'No other records in the pipeline right now.' : 'Nothing matches "$_query".',
+              );
+            }
+            return ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.5),
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  AppListGroup(
+                    children: [
+                      for (final r in offered)
+                        AppListRow(
+                          leading: RowThumb(color: r.swatch, icon: r.swatch == null ? Icons.palette_outlined : null),
+                          title: r.name,
+                          subtitle: r.summary,
+                          trailing: AppButton.secondary(
+                            label: 'Move here',
+                            compact: true,
+                            expand: false,
+                            busy: _busyFor == r.id,
+                            onPressed: busy ? null : () => _moveTo(r.id),
+                          ),
+                        ),
+                    ],
                   ),
-              ],
+                ],
+              ),
             );
           },
-        ),
-        const SectionHeader('New pile for this Thaan', top: 20),
-        AppTextField(
-          label: 'Name',
-          required: true,
-          hint: 'e.g. Peacock florals',
-          controller: _name,
-          textCapitalization: TextCapitalization.sentences,
-          textInputAction: TextInputAction.done,
-          onChanged: (_) => setState(() {}),
-        ),
-        const SizedBox(height: 12),
-        colours.when(
-          loading: () => const Skeleton(height: 48, radius: 12),
-          error: (e, _) => InlineNotice('$e', icon: Icons.cloud_off_outlined, warning: true),
-          data: (rows) => PickerField(
-            label: 'Main colour',
-            required: true,
-            value: _colourId,
-            hint: 'Choose…',
-            options: [for (final c in rows) PickerOption(c.id, c.label, color: colourSwatch(c.label))],
-            onChanged: (v) => setState(() => _colourId = v),
-          ),
-        ),
-        const SizedBox(height: 16),
-        AppButton.primary(
-          label: 'Make pile and move here',
-          icon: Icons.add,
-          busy: _busyFor == 'new',
-          onPressed: busy || _name.text.trim().isEmpty || _colourId == null ? null : _makeAndMove,
         ),
       ],
     );

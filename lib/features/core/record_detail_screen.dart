@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/api_client.dart';
 import '../../models/core.dart';
 import '../../widgets/ui/ui.dart';
 import 'core_auth.dart';
 import 'new_record_screen.dart';
+import 'pipeline_providers.dart';
 import 'record_fields.dart';
 import 'record_form_fields.dart';
 import 'record_photos_screen.dart';
@@ -411,6 +413,18 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
               SignedInActor(actor: actor),
               const SizedBox(height: 14),
             ],
+            // The Thaans behind this record, if it came through the
+            // pipeline: where they are, what is still to fill in, and the
+            // two things to do about it. A record filed at a desk has no
+            // Thaans and no section.
+            if (record.pipeline.thaanCount > 0)
+              _ProductionSection(
+                recordId: widget.recordId,
+                pipeline: record.pipeline,
+                onReturned: () => setState(() {
+                  _record = _load(seed: false);
+                }),
+              ),
             /*
               Attributes belong to the design, not the colour.
 
@@ -606,6 +620,124 @@ class _RecordDetailScreenState extends ConsumerState<RecordDetailScreen>
             ),
       ],
     );
+  }
+}
+
+// ── Production ───────────────────────────────────────────────────────────────
+
+/// Where a record's Thaans are — three counts, what is still to fill in,
+/// the two things to do about it, and the Thaans themselves.
+class _ProductionSection extends ConsumerWidget {
+  const _ProductionSection({
+    required this.recordId,
+    required this.pipeline,
+    required this.onReturned,
+  });
+
+  final String recordId;
+  final CoreRecordPipeline pipeline;
+
+  /// Called on the way back from Fill in / Put on shelf — the counts above
+  /// and the Thaans below have both changed by then.
+  final VoidCallback onReturned;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final thaans = ref.watch(recordThaansProvider(recordId));
+    final n = pipeline.finishedCount;
+
+    Future<void> open(String path) async {
+      await context.push(path);
+      if (context.mounted) {
+        ref.invalidate(recordThaansProvider(recordId));
+        onReturned();
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionHeader(
+          'Production',
+          top: 0,
+          trailing: pipeline.stage == null ? null : StatusBadge(pipeline.stage!, tone: BadgeTone.brand),
+        ),
+        AppCard(
+          emphasis: true,
+          child: Row(
+            children: [
+              Expanded(
+                child: StatTile(
+                  value: '$n',
+                  label: 'Back from Ironing',
+                  tone: n > 0 ? BadgeTone.success : BadgeTone.neutral,
+                ),
+              ),
+              Expanded(child: StatTile(value: '${pipeline.shelvedCount}', label: 'On shelf')),
+              Expanded(child: StatTile(value: '${pipeline.inPipeline}', label: 'In pipeline')),
+            ],
+          ),
+        ),
+        if (pipeline.needs.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          InlineNotice(
+            'Still needs ${pipeline.needs.join(', ')}.',
+            icon: Icons.pending_outlined,
+            warning: true,
+          ),
+        ],
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: AppButton.secondary(
+                label: 'Fill in details',
+                icon: Icons.edit_outlined,
+                onPressed: () => open('/core/records/$recordId/fill'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: AppButton.primary(
+                label: 'Put $n on the shelf',
+                icon: Icons.inventory_2_outlined,
+                onPressed: n == 0 ? null : () => open('/core/records/$recordId/shelf'),
+              ),
+            ),
+          ],
+        ),
+        SectionHeader('Thaans', trailing: Text('${pipeline.thaanCount}')),
+        AsyncView<List<CorePipelineThaan>>(
+          value: thaans,
+          onRetry: () => ref.invalidate(recordThaansProvider(recordId)),
+          loading: const LoadingState(rows: 3),
+          isEmpty: (rows) => rows.isEmpty,
+          emptyMessage: 'No Thaans linked to this record.',
+          data: (rows) => AppListGroup(
+            children: [
+              for (final t in rows)
+                AppListRow(
+                  title: t.code,
+                  titleMono: true,
+                  dense: true,
+                  subtitle: [if (t.baleCode != null) t.baleCode!, t.where].join(' · '),
+                  trailing: _thaanTrailing(t),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+      ],
+    );
+  }
+
+  /// Voided beats shelved: a voided Thaan is never stock. A shelved one
+  /// says where it is — or that it has gone.
+  static Widget? _thaanTrailing(CorePipelineThaan t) {
+    if (t.voidedAt != null) return const StatusBadge('Voided', tone: BadgeTone.danger);
+    if (t.pieceCode == null) return null;
+    if (!t.isHeld) return const StatusBadge('Gone', tone: BadgeTone.danger);
+    return StatusBadge(t.locationName ?? 'On shelf', tone: BadgeTone.success);
   }
 }
 

@@ -202,6 +202,7 @@ class CoreRecordRow {
     this.priceMinor,
     required this.sold,
     required this.syncStatus,
+    this.pipeline = const CoreRecordPipeline(),
   });
 
   final String id;
@@ -246,6 +247,17 @@ class CoreRecordRow {
   /// here so the list doesn't hide it behind a tap.
   final CoreSyncStatus syncStatus;
 
+  /// The Thaans behind this record, if any — how many, where they are,
+  /// what is still to fill in. Empty (all zero) on a server that predates
+  /// records-with-Thaans.
+  final CoreRecordPipeline pipeline;
+
+  int get thaanCount => pipeline.thaanCount;
+  int get finishedCount => pipeline.finishedCount;
+  int get shelvedCount => pipeline.shelvedCount;
+  String? get stage => pipeline.stage;
+  List<String> get needs => pipeline.needs;
+
   Color? get swatch => _swatchOf(colourHex);
 
   String get price => _rupees(priceMinor);
@@ -278,6 +290,7 @@ class CoreRecordRow {
         priceMinor: _intOf(json['priceMinor']),
         sold: _intOf(json['sold']) ?? 0,
         syncStatus: CoreSyncStatus.fromJson(json['syncStatus'] as String?),
+        pipeline: CoreRecordPipeline.fromJson(json),
       );
 }
 
@@ -539,6 +552,7 @@ class CoreRecordDetail {
     required this.images,
     required this.descriptors,
     required this.movements,
+    this.pipeline = const CoreRecordPipeline(),
   });
 
   final String id;
@@ -586,6 +600,10 @@ class CoreRecordDetail {
   /// Movement writes, read back.
   final List<CoreMovement> movements;
 
+  /// The Thaans behind this record — see [CoreRecordPipeline]. All zero on
+  /// a server that doesn't send `pipeline`.
+  final CoreRecordPipeline pipeline;
+
   factory CoreRecordDetail.fromJson(Map<String, dynamic> json) =>
       CoreRecordDetail(
         id: json['id'] as String,
@@ -628,6 +646,9 @@ class CoreRecordDetail {
           for (final m in (json['movements'] as List? ?? const []))
             CoreMovement.fromJson((m as Map).cast<String, dynamic>()),
         ],
+        pipeline: json['pipeline'] is Map
+            ? CoreRecordPipeline.fromJson((json['pipeline'] as Map).cast<String, dynamic>())
+            : const CoreRecordPipeline(),
       );
 }
 
@@ -990,13 +1011,20 @@ class CoreThaan {
     required this.lastVendorName,
     required this.lastStage,
     this.id,
-    this.pileId,
-    this.pileCode,
-    this.pileName,
+    this.colourwayId,
+    this.recordCode,
+    this.recordName,
+    this.recordColour,
+    this.pieceCode,
+    this.productCode,
+    this.locationName,
+    this.isHeld,
+    this.priceMinor,
+    this.stockStatus,
   });
 
-  /// The row id — what `/piles/:id/thaans` wants. Nullable because the
-  /// lookup predates piles and an older server may not send it.
+  /// The row id — what `/records/:id/thaans` wants. Nullable because the
+  /// lookup predates records-with-Thaans and an older server may not send it.
   final String? id;
 
   final String? code;
@@ -1060,17 +1088,56 @@ class CoreThaan {
   final String? lastVendorName;
   final String? lastStage;
 
-  /// The pile this Thaan sits in, if any — see [CorePile]. All null when it
-  /// isn't in one (or the server predates piles).
-  final String? pileId;
-  final String? pileCode;
-  final String? pileName;
+  /// The Product Management record this Thaan is linked to, if any — the
+  /// colourway it was sorted into when it came back from Print. All null
+  /// when it isn't in one (or the server predates the link).
+  final String? colourwayId;
+  final String? recordCode;
+  final String? recordName;
+  final String? recordColour;
+
+  /// Once shelved: the piece it became (the same code as the QR label
+  /// already on it), the product it sits under, and where the ledger says
+  /// it is. Null while it is still in the pipeline.
+  final String? pieceCode;
+  final String? productCode;
+  final String? locationName;
+
+  /// Still ours, once shelved — null while there is no piece to hold.
+  final bool? isHeld;
+
+  /// Retail, in paise, once shelved.
+  final num? priceMinor;
+
+  /// "In pipeline", "On shelf", "Gone" or "Voided" — the server's one-word
+  /// answer to "where is it". Null from a server that predates it.
+  final String? stockStatus;
+
+  /// "KC-0412 · Peacock florals · Teal", or null when not in a record.
+  String? get recordLabel {
+    if (colourwayId == null) return null;
+    final parts = [
+      if (recordCode != null && recordCode!.isNotEmpty) recordCode!,
+      if (recordName != null && recordName!.isNotEmpty) recordName!,
+      if (recordColour != null && recordColour!.isNotEmpty) recordColour!,
+    ];
+    return parts.isEmpty ? 'Record' : parts.join(' · ');
+  }
+
+  String get price => _rupees(priceMinor?.toInt());
 
   factory CoreThaan.fromJson(Map<String, dynamic> json) => CoreThaan(
         id: _stringOf(json['id']),
-        pileId: _stringOf(json['pileId']),
-        pileCode: _stringOf(json['pileCode']),
-        pileName: _stringOf(json['pileName']),
+        colourwayId: _stringOf(json['colourwayId']),
+        recordCode: _stringOf(json['recordCode']),
+        recordName: _stringOf(json['recordName']),
+        recordColour: _stringOf(json['recordColour']),
+        pieceCode: _stringOf(json['pieceCode']),
+        productCode: _stringOf(json['productCode']),
+        locationName: _stringOf(json['locationName']),
+        isHeld: json['isHeld'] is bool ? json['isHeld'] as bool : null,
+        priceMinor: _numOf(json['priceMinor']),
+        stockStatus: _stringOf(json['stockStatus']),
         code: json['code'] as String?,
         baleCode: json['baleCode'] as String,
         supplierName: json['supplierName'] as String,
@@ -1399,10 +1466,11 @@ class CoreThaanForReceive {
     this.throughStage,
     this.vendorId,
     required this.vendorName,
-    this.pileId,
-    this.pileCode,
-    this.pileName,
-    this.canPile = false,
+    this.colourwayId,
+    this.recordCode,
+    this.recordName,
+    this.recordColour,
+    this.canRecord = false,
   });
 
   final String id;
@@ -1412,15 +1480,27 @@ class CoreThaanForReceive {
   final String itemName;
   final String stage;
 
-  /// The pile this Thaan is already in, if any — receiving it into another
-  /// pile moves it, and the Receive screen says so.
-  final String? pileId;
-  final String? pileCode;
-  final String? pileName;
+  /// The record this Thaan is already linked to, if any — receiving it into
+  /// another record moves it, and the Receive screen says so.
+  final String? colourwayId;
+  final String? recordCode;
+  final String? recordName;
+  final String? recordColour;
 
   /// Whether this receive is Print or later — the only point from which a
-  /// Thaan can go into a pile. False when the server didn't say.
-  final bool canPile;
+  /// Thaan can be sorted into a record. False when the server didn't say.
+  final bool canRecord;
+
+  /// "KC-0412 · Teal", or null when not in a record yet.
+  String? get recordLabel {
+    if (colourwayId == null) return null;
+    final parts = [
+      if (recordCode != null && recordCode!.isNotEmpty) recordCode!,
+      if (recordName != null && recordName!.isNotEmpty) recordName!,
+      if (recordColour != null && recordColour!.isNotEmpty) recordColour!,
+    ];
+    return parts.isEmpty ? 'a record' : parts.join(' · ');
+  }
 
   /// The last stage of a combined trip, or null for an ordinary one-stage
   /// trip. Receiving closes every stage up to it in one go.
@@ -1440,280 +1520,21 @@ class CoreThaanForReceive {
         throughStage: json['throughStage'] as String?,
         vendorId: json['vendorId'] as String?,
         vendorName: json['vendorName'] as String,
-        pileId: _stringOf(json['pileId']),
-        pileCode: _stringOf(json['pileCode']),
-        pileName: _stringOf(json['pileName']),
-        canPile: json['canPile'] == true,
-      );
-}
-
-// ── Piles ───────────────────────────────────────────────────────────────────
-
-/// One main colour a pile can be labelled with — `GET /piles/colours`.
-class CoreColour {
-  const CoreColour({required this.id, required this.label});
-
-  final String id;
-  final String label;
-
-  factory CoreColour.fromJson(Map<String, dynamic> json) => CoreColour(
-        id: '${json['id']}',
-        label: _stringOf(json['label']) ?? '${json['id']}',
-      );
-}
-
-/// The Thaans that came back from Print printed the same way — one design,
-/// one colour combination — made at the door as a delivery is received.
-/// The list row (`GET /piles`) and the detail (`GET /piles/:id`) share this
-/// shape; only the detail fills [thaans] and [events].
-class CorePile {
-  const CorePile({
-    required this.id,
-    required this.code,
-    required this.name,
-    this.photoUrl,
-    this.mainColourId,
-    this.mainColour,
-    this.createdStage,
-    required this.status,
-    required this.thaanCount,
-    this.baleCodes = const [],
-    this.createdAt,
-    this.createdByName,
-    this.thaans = const [],
-    this.events = const [],
-    this.colourwayId,
-    this.designCode,
-    this.recordName,
-    this.stage = '',
-    this.needs = const [],
-    this.finishedCount = 0,
-    this.shelvedCount = 0,
-  });
-
-  final String id;
-  final String code;
-  final String name;
-  final String? photoUrl;
-  final String? mainColourId;
-
-  /// The colour's label, as the server names it.
-  final String? mainColour;
-
-  /// The stage whose receive this pile was made at — Print, Second Print…
-  final String? createdStage;
-
-  /// `draft`, `ready` or `live`.
-  final String status;
-  final int thaanCount;
-  final List<String> baleCodes;
-  final String? createdAt;
-  final String? createdByName;
-
-  final List<CorePileThaan> thaans;
-  final List<CorePileEvent> events;
-
-  // ── Phase 2: the Product Management record behind the pile ──
-
-  /// The colourway (record) the first "complete" made; null until then.
-  final String? colourwayId;
-  final String? designCode;
-  final String? recordName;
-
-  /// Where the pile is now — the stage its Thaans are at.
-  final String stage;
-
-  /// Short words for what is still to be filled in ("motif", "craft",
-  /// "border"); empty once every decided-so-far detail is in.
-  final List<String> needs;
-
-  // ── Phase 3: from pile to shelf ──
-
-  /// Thaans back from Ironing that are not stock yet — what "Put on shelf"
-  /// would take. Zero on a Phase 2 server.
-  final int finishedCount;
-
-  /// Thaans already shelved as pieces.
-  final int shelvedCount;
-
-  /// Where it is now, falling back to where it was made for a server that
-  /// doesn't send `stage` yet.
-  String? get stageLabel => stage.isNotEmpty ? stage : createdStage;
-
-  /// "KC-0412 · Peacock florals", or null while there is no record yet.
-  String? get recordLabel {
-    if (designCode == null && recordName == null) return null;
-    return [?designCode, ?recordName].join(' · ');
-  }
-
-  factory CorePile.fromJson(Map<String, dynamic> json) => CorePile(
-        id: '${json['id']}',
-        code: _stringOf(json['code']) ?? '',
-        name: _stringOf(json['name']) ?? '',
-        photoUrl: _stringOf(json['photoUrl']),
-        mainColourId: _stringOf(json['mainColourId']),
-        mainColour: _stringOf(json['mainColour']),
-        createdStage: _stringOf(json['createdStage']),
-        status: _stringOf(json['status']) ?? 'draft',
-        thaanCount: _intOf(json['thaanCount']) ?? (json['thaans'] as List?)?.length ?? 0,
-        baleCodes: [for (final b in (json['baleCodes'] as List? ?? const [])) '$b'],
-        createdAt: _stringOf(json['createdAt']),
-        createdByName: _stringOf(json['createdByName']),
-        thaans: [
-          for (final t in (json['thaans'] as List? ?? const []))
-            CorePileThaan.fromJson((t as Map).cast<String, dynamic>()),
-        ],
-        events: [
-          for (final e in (json['events'] as List? ?? const []))
-            CorePileEvent.fromJson((e as Map).cast<String, dynamic>()),
-        ],
         colourwayId: _stringOf(json['colourwayId']),
-        designCode: _stringOf(json['designCode']),
+        recordCode: _stringOf(json['recordCode']),
         recordName: _stringOf(json['recordName']),
-        stage: _stringOf(json['stage']) ?? '',
-        needs: _needsOf(json['needs']),
-        finishedCount: _intOf(json['finishedCount']) ?? 0,
-        shelvedCount: _intOf(json['shelvedCount']) ?? 0,
+        recordColour: _stringOf(json['recordColour']),
+        canRecord: json['canRecord'] == true,
       );
 }
+
+// ── The production pipeline behind a record ─────────────────────────────────
 
 /// `needs` as the server sends it — a list of short words — or nothing.
 List<String> _needsOf(Object? raw) => [
       for (final n in (raw is List ? raw : const []))
         if (n != null && '$n'.isNotEmpty) '$n',
     ];
-
-/// A detail already settled by the bale's cloth item, shown on the complete
-/// screen so nobody types it again.
-class CorePileInherited {
-  const CorePileInherited({required this.key, required this.label, required this.valueLabel});
-
-  final String key;
-  final String label;
-  final String valueLabel;
-
-  factory CorePileInherited.fromJson(Map<String, dynamic> json) => CorePileInherited(
-        key: _stringOf(json['key']) ?? '',
-        label: _stringOf(json['label']) ?? _stringOf(json['key']) ?? '',
-        valueLabel: _stringOf(json['valueLabel']) ?? '—',
-      );
-}
-
-/// One detail to decide on the complete screen: which attribute, which
-/// Master List to pick from, and what (if anything) is picked so far.
-class CorePileField {
-  const CorePileField({
-    required this.key,
-    required this.label,
-    required this.list,
-    this.valueId,
-    this.valueLabel,
-    this.required = false,
-  });
-
-  /// The attribute key sent back in `POST /piles/:id/complete`.
-  final String key;
-  final String label;
-
-  /// The Master List code — `motif`, `craft_technique`, `border_style` —
-  /// which is the key into [CoreOptions].
-  final String list;
-  final String? valueId;
-  final String? valueLabel;
-  final bool required;
-
-  factory CorePileField.fromJson(Map<String, dynamic> json) => CorePileField(
-        key: _stringOf(json['key']) ?? '',
-        label: _stringOf(json['label']) ?? _stringOf(json['key']) ?? '',
-        list: _stringOf(json['list']) ?? '',
-        valueId: _stringOf(json['valueId']),
-        valueLabel: _stringOf(json['valueLabel']),
-        required: json['required'] == true,
-      );
-}
-
-/// `GET /piles/:id/draft` — everything the complete screen needs: what is
-/// inherited, what is to be decided, and what has been decided already.
-class CorePileDraft {
-  const CorePileDraft({
-    required this.pileId,
-    required this.pileCode,
-    required this.pileName,
-    required this.stage,
-    this.colourwayId,
-    this.designCode,
-    this.recordName,
-    this.inherited = const [],
-    this.lengthCm,
-    this.widthCm,
-    this.colourId,
-    this.colourLabel,
-    this.secondaryColourId,
-    this.secondaryColourLabel,
-    this.fields = const [],
-    this.needs = const [],
-  });
-
-  final String pileId;
-  final String pileCode;
-  final String pileName;
-  final String stage;
-  final String? colourwayId;
-  final String? designCode;
-  final String? recordName;
-  final List<CorePileInherited> inherited;
-
-  /// `extra.lengthCm` / `extra.widthCm` — the saree size, when the item
-  /// carries one.
-  final num? lengthCm;
-  final num? widthCm;
-  final String? colourId;
-  final String? colourLabel;
-  final String? secondaryColourId;
-  final String? secondaryColourLabel;
-  final List<CorePileField> fields;
-  final List<String> needs;
-
-  /// "KC-0412 · Peacock florals", or null until the first save makes one.
-  String? get recordLabel {
-    if (designCode == null && recordName == null) return null;
-    return [?designCode, ?recordName].join(' · ');
-  }
-
-  /// "550 × 112 cm", or null when the item has no size.
-  String? get sareeSize {
-    if (lengthCm == null || widthCm == null) return null;
-    return '${_plainNum(lengthCm!)} × ${_plainNum(widthCm!)} cm';
-  }
-
-  factory CorePileDraft.fromJson(Map<String, dynamic> json) {
-    final extra = (json['extra'] as Map?)?.cast<String, dynamic>() ?? const {};
-    return CorePileDraft(
-      pileId: '${json['pileId']}',
-      pileCode: _stringOf(json['pileCode']) ?? '',
-      pileName: _stringOf(json['pileName']) ?? '',
-      stage: _stringOf(json['stage']) ?? '',
-      colourwayId: _stringOf(json['colourwayId']),
-      designCode: _stringOf(json['designCode']),
-      recordName: _stringOf(json['recordName']),
-      inherited: [
-        for (final i in (json['inherited'] as List? ?? const []))
-          CorePileInherited.fromJson((i as Map).cast<String, dynamic>()),
-      ],
-      lengthCm: _numOf(extra['lengthCm']),
-      widthCm: _numOf(extra['widthCm']),
-      colourId: _stringOf(json['colourId']),
-      colourLabel: _stringOf(json['colourLabel']),
-      secondaryColourId: _stringOf(json['secondaryColourId']),
-      secondaryColourLabel: _stringOf(json['secondaryColourLabel']),
-      fields: [
-        for (final f in (json['fields'] as List? ?? const []))
-          CorePileField.fromJson((f as Map).cast<String, dynamic>()),
-      ],
-      needs: _needsOf(json['needs']),
-    );
-  }
-}
 
 num? _numOf(Object? value) {
   if (value == null) return null;
@@ -1725,9 +1546,130 @@ num? _numOf(Object? value) {
 /// "550" for 550.0, "112.5" for 112.5 — a size without a trailing ".0".
 String _plainNum(num n) => n == n.roundToDouble() ? '${n.toInt()}' : '$n';
 
-/// One Thaan inside a pile, as the detail lists it.
-class CorePileThaan {
-  const CorePileThaan({
+/// "6 Thaans · Nellateeta · needs craft" — the one line a list row or a
+/// detail header says about a record's Thaans. Null when it has none.
+String? _pipelineLine({
+  required int thaanCount,
+  required String? stage,
+  required List<String> needs,
+}) {
+  if (thaanCount <= 0) return null;
+  return [
+    '$thaanCount Thaan${thaanCount == 1 ? '' : 's'}',
+    if (stage != null && stage.isNotEmpty) stage,
+    if (needs.isNotEmpty) 'needs ${needs.join(', ')}',
+  ].join(' · ');
+}
+
+/// How far a record's Thaans have got — the same five facts on a list row
+/// (`GET /records`) and, as `pipeline`, on the detail (`GET /records/:id`).
+/// An older server sends none of them, which reads as "no Thaans".
+class CoreRecordPipeline {
+  const CoreRecordPipeline({
+    this.thaanCount = 0,
+    this.finishedCount = 0,
+    this.shelvedCount = 0,
+    this.stage,
+    this.needs = const [],
+  });
+
+  /// Every Thaan linked to the record, voided ones aside.
+  final int thaanCount;
+
+  /// Back from Ironing and not stock yet — what "Put on the shelf" takes.
+  final int finishedCount;
+
+  /// Already on the shelf as pieces.
+  final int shelvedCount;
+
+  /// Where the Thaans are now — the stage most of them are at.
+  final String? stage;
+
+  /// Short words for what is still to be filled in ("motif", "craft");
+  /// empty once every detail decided so far is in.
+  final List<String> needs;
+
+  /// Still out at a stage — neither finished nor shelved.
+  int get inPipeline {
+    final n = thaanCount - finishedCount - shelvedCount;
+    return n < 0 ? 0 : n;
+  }
+
+  String? get line => _pipelineLine(thaanCount: thaanCount, stage: stage, needs: needs);
+
+  factory CoreRecordPipeline.fromJson(Map<String, dynamic> json) => CoreRecordPipeline(
+        thaanCount: _intOf(json['thaanCount']) ?? 0,
+        finishedCount: _intOf(json['finishedCount']) ?? 0,
+        shelvedCount: _intOf(json['shelvedCount']) ?? 0,
+        stage: _stringOf(json['stage']),
+        needs: _needsOf(json['needs']),
+      );
+}
+
+/// One row of `GET /records/pipeline` — a record with Thaans behind it,
+/// slim enough for a picker: which record, what it looks like, how far
+/// along it is.
+class CorePipelineRecord {
+  const CorePipelineRecord({
+    required this.id,
+    required this.code,
+    required this.name,
+    this.colour,
+    this.colourHex,
+    this.motif,
+    this.motifCategory,
+    this.thaanCount = 0,
+    this.finishedCount = 0,
+    this.shelvedCount = 0,
+    this.stage,
+    this.needs = const [],
+  });
+
+  final String id;
+  final String code;
+  final String name;
+  final String? colour;
+  final String? colourHex;
+  final String? motif;
+  final String? motifCategory;
+  final int thaanCount;
+  final int finishedCount;
+  final int shelvedCount;
+  final String? stage;
+  final List<String> needs;
+
+  Color? get swatch => _swatchOf(colourHex);
+
+  /// "KC-0412 · Teal · Peacock · 6 Thaans" — the picker's one line.
+  String get summary => [
+        code,
+        if (colour != null && colour!.isNotEmpty) colour!,
+        if (motif != null && motif!.isNotEmpty) motif!,
+        '$thaanCount Thaan${thaanCount == 1 ? '' : 's'}',
+      ].join(' · ');
+
+  /// Everything somebody might type to find this row.
+  String get haystack => [code, name, colour ?? '', motif ?? '', motifCategory ?? ''].join(' ').toLowerCase();
+
+  factory CorePipelineRecord.fromJson(Map<String, dynamic> json) => CorePipelineRecord(
+        id: '${json['id']}',
+        code: _stringOf(json['code']) ?? '',
+        name: _stringOf(json['name']) ?? '',
+        colour: _stringOf(json['colour']),
+        colourHex: _stringOf(json['colourHex']),
+        motif: _stringOf(json['motif']),
+        motifCategory: _stringOf(json['motifCategory']),
+        thaanCount: _intOf(json['thaanCount']) ?? 0,
+        finishedCount: _intOf(json['finishedCount']) ?? 0,
+        shelvedCount: _intOf(json['shelvedCount']) ?? 0,
+        stage: _stringOf(json['stage']),
+        needs: _needsOf(json['needs']),
+      );
+}
+
+/// One Thaan linked to a record, as `GET /records/:id/thaans` lists it.
+class CorePipelineThaan {
+  const CorePipelineThaan({
     required this.id,
     required this.code,
     this.baleCode,
@@ -1735,17 +1677,14 @@ class CorePileThaan {
     this.openStage,
     this.completedStages = 0,
     this.pieceCode,
+    this.locationName,
+    this.isHeld = false,
   });
 
   final String id;
   final String code;
   final String? baleCode;
   final String? voidedAt;
-
-  /// Its shelf piece code once it has been shelved — the same as [code],
-  /// since the QR label already on the Thaan is the shelf label. Null while
-  /// it is still in the pipeline.
-  final String? pieceCode;
 
   /// The stage it's out for right now, or null when it's in hand.
   final String? openStage;
@@ -1754,9 +1693,24 @@ class CorePileThaan {
   /// number or the list of stage names.
   final int completedStages;
 
-  factory CorePileThaan.fromJson(Map<String, dynamic> json) {
+  /// Its shelf piece code once shelved — the QR label already on it. Null
+  /// while it is still in the pipeline.
+  final String? pieceCode;
+
+  /// Where the piece is, once shelved.
+  final String? locationName;
+
+  /// Still ours, once shelved — sold, written off or sent on make it false.
+  final bool isHeld;
+
+  /// "Out for Nellateeta" / "4 stages done" — where it is, in a phrase.
+  String get where => openStage != null
+      ? 'Out for $openStage'
+      : '$completedStages stage${completedStages == 1 ? '' : 's'} done';
+
+  factory CorePipelineThaan.fromJson(Map<String, dynamic> json) {
     final done = json['completedStages'];
-    return CorePileThaan(
+    return CorePipelineThaan(
       id: '${json['id']}',
       code: _stringOf(json['code']) ?? '',
       baleCode: _stringOf(json['baleCode']),
@@ -1764,46 +1718,140 @@ class CorePileThaan {
       openStage: _stringOf(json['openStage']),
       completedStages: done is List ? done.length : (_intOf(done) ?? 0),
       pieceCode: _stringOf(json['pieceCode']),
+      locationName: _stringOf(json['locationName']),
+      isHeld: json['isHeld'] == true,
     );
   }
 }
 
-/// One thing that happened to a pile — made, a Thaan added, a Thaan moved
-/// in from another pile (`detail['from']` names it).
-class CorePileEvent {
-  const CorePileEvent({
-    required this.id,
-    required this.kind,
-    this.stage,
-    this.thaanCode,
-    this.detail = const {},
-    this.actorName,
-    this.at,
-  });
+/// A detail already settled by the bale's cloth item, shown on the fill
+/// screen so nobody types it again.
+class CoreRecordInherited {
+  const CoreRecordInherited({required this.key, required this.label, required this.valueLabel});
 
-  final String id;
-  final String kind;
-  final String? stage;
-  final String? thaanCode;
-  final Map<String, dynamic> detail;
-  final String? actorName;
-  final String? at;
+  final String key;
+  final String label;
+  final String valueLabel;
 
-  /// For a "moved" event: the pile the Thaan came from.
-  String? get from => _stringOf(detail['from']);
-
-  factory CorePileEvent.fromJson(Map<String, dynamic> json) => CorePileEvent(
-        id: '${json['id']}',
-        kind: _stringOf(json['kind']) ?? '',
-        stage: _stringOf(json['stage']),
-        thaanCode: _stringOf(json['thaanCode']),
-        detail: json['detail'] is Map ? (json['detail'] as Map).cast<String, dynamic>() : const {},
-        actorName: _stringOf(json['actorName']),
-        at: _stringOf(json['at']),
+  factory CoreRecordInherited.fromJson(Map<String, dynamic> json) => CoreRecordInherited(
+        key: _stringOf(json['key']) ?? '',
+        label: _stringOf(json['label']) ?? _stringOf(json['key']) ?? '',
+        valueLabel: _stringOf(json['valueLabel']) ?? '—',
       );
 }
 
-// ── Piles — Phase 3: from pile to shelf ──
+/// One detail to decide on the fill screen: which attribute, which Master
+/// List to pick from, and what (if anything) is picked so far.
+class CoreRecordFillField {
+  const CoreRecordFillField({
+    required this.key,
+    required this.label,
+    required this.list,
+    this.valueId,
+    this.valueLabel,
+    this.required = false,
+  });
+
+  /// The attribute key sent back in `POST /records/:id/fill`.
+  final String key;
+  final String label;
+
+  /// The Master List code — `motif`, `craft_technique`, `border_style` —
+  /// which is the key into [CoreOptions].
+  final String list;
+  final String? valueId;
+  final String? valueLabel;
+  final bool required;
+
+  factory CoreRecordFillField.fromJson(Map<String, dynamic> json) => CoreRecordFillField(
+        key: _stringOf(json['key']) ?? '',
+        label: _stringOf(json['label']) ?? _stringOf(json['key']) ?? '',
+        list: _stringOf(json['list']) ?? '',
+        valueId: _stringOf(json['valueId']),
+        valueLabel: _stringOf(json['valueLabel']),
+        required: json['required'] == true,
+      );
+}
+
+/// `GET /records/:id/fill` — everything the fill screen needs: what is
+/// inherited from the cloth item, what is to be decided, and what has been
+/// decided already.
+class CoreRecordFill {
+  const CoreRecordFill({
+    required this.colourwayId,
+    this.designCode,
+    this.recordName,
+    this.stage = '',
+    this.thaanCount = 0,
+    this.inherited = const [],
+    this.lengthCm,
+    this.widthCm,
+    this.colourId,
+    this.colourLabel,
+    this.secondaryColourId,
+    this.secondaryColourLabel,
+    this.fields = const [],
+    this.needs = const [],
+  });
+
+  final String colourwayId;
+  final String? designCode;
+  final String? recordName;
+  final String stage;
+  final int thaanCount;
+  final List<CoreRecordInherited> inherited;
+
+  /// `extra.lengthCm` / `extra.widthCm` — the saree size, when the item
+  /// carries one.
+  final num? lengthCm;
+  final num? widthCm;
+  final String? colourId;
+  final String? colourLabel;
+  final String? secondaryColourId;
+  final String? secondaryColourLabel;
+  final List<CoreRecordFillField> fields;
+  final List<String> needs;
+
+  /// "KC-0412 · Peacock florals", or null when the server named neither.
+  String? get recordLabel {
+    if (designCode == null && recordName == null) return null;
+    return [?designCode, ?recordName].join(' · ');
+  }
+
+  /// "550 × 112 cm", or null when the item has no size.
+  String? get sareeSize {
+    if (lengthCm == null || widthCm == null) return null;
+    return '${_plainNum(lengthCm!)} × ${_plainNum(widthCm!)} cm';
+  }
+
+  factory CoreRecordFill.fromJson(Map<String, dynamic> json) {
+    final extra = (json['extra'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return CoreRecordFill(
+      colourwayId: '${json['colourwayId']}',
+      designCode: _stringOf(json['designCode']),
+      recordName: _stringOf(json['recordName']),
+      stage: _stringOf(json['stage']) ?? '',
+      thaanCount: _intOf(json['thaanCount']) ?? 0,
+      inherited: [
+        for (final i in (json['inherited'] as List? ?? const []))
+          CoreRecordInherited.fromJson((i as Map).cast<String, dynamic>()),
+      ],
+      lengthCm: _numOf(extra['lengthCm']),
+      widthCm: _numOf(extra['widthCm']),
+      colourId: _stringOf(json['colourId']),
+      colourLabel: _stringOf(json['colourLabel']),
+      secondaryColourId: _stringOf(json['secondaryColourId']),
+      secondaryColourLabel: _stringOf(json['secondaryColourLabel']),
+      fields: [
+        for (final f in (json['fields'] as List? ?? const []))
+          CoreRecordFillField.fromJson((f as Map).cast<String, dynamic>()),
+      ],
+      needs: _needsOf(json['needs']),
+    );
+  }
+}
+
+// ── From the pipeline to the shelf ──
 
 /// A Thaan as the shelf draft lists it — just enough to name it.
 class CoreShelfThaan {
@@ -1834,7 +1882,7 @@ class CoreShelfLocation {
 }
 
 /// The five prices a shelved product carries, as rupee strings — "" when
-/// unset. Same shape going up in `POST /piles/:id/shelf` as coming down.
+/// unset. Same shape going up in `POST /records/:id/shelf` as coming down.
 class CoreShelfPrices {
   const CoreShelfPrices({
     this.cost = '',
@@ -1867,16 +1915,12 @@ class CoreShelfPrices {
       };
 }
 
-/// `GET /piles/:id/shelf` — what the shelf screen shows: which Thaans are
+/// `GET /records/:id/shelf` — what the shelf screen shows: which Thaans are
 /// back from Ironing and would go, which are on the shelf already, the
 /// prices set so far, where they can go, and anything in the way.
-class CoreShelfDraft {
-  const CoreShelfDraft({
-    required this.pileId,
-    required this.pileCode,
-    required this.pileName,
-    required this.status,
-    this.colourwayId,
+class CoreRecordShelf {
+  const CoreRecordShelf({
+    required this.colourwayId,
     this.designCode,
     this.recordName,
     this.pieceTracked = false,
@@ -1885,14 +1929,11 @@ class CoreShelfDraft {
     this.inPipeline = 0,
     this.prices = const CoreShelfPrices(),
     this.locations = const [],
+    this.needs = const [],
     this.blockers = const [],
   });
 
-  final String pileId;
-  final String pileCode;
-  final String pileName;
-  final String status;
-  final String? colourwayId;
+  final String colourwayId;
   final String? designCode;
   final String? recordName;
 
@@ -1910,22 +1951,22 @@ class CoreShelfDraft {
   final CoreShelfPrices prices;
   final List<CoreShelfLocation> locations;
 
-  /// Why the pile can't go on the shelf yet, in the server's words. Empty
-  /// when it can.
+  /// Details still to fill in before the record is whole — see
+  /// [CoreRecordPipeline.needs].
+  final List<String> needs;
+
+  /// Why the Thaans can't go on the shelf yet, in the server's words. Empty
+  /// when they can.
   final List<String> blockers;
 
-  /// "KC-0412 · Peacock florals", or null while there is no record yet.
+  /// "KC-0412 · Peacock florals", or null when the server named neither.
   String? get recordLabel {
     if (designCode == null && recordName == null) return null;
     return [?designCode, ?recordName].join(' · ');
   }
 
-  factory CoreShelfDraft.fromJson(Map<String, dynamic> json) => CoreShelfDraft(
-        pileId: '${json['pileId']}',
-        pileCode: _stringOf(json['pileCode']) ?? '',
-        pileName: _stringOf(json['pileName']) ?? '',
-        status: _stringOf(json['status']) ?? 'draft',
-        colourwayId: _stringOf(json['colourwayId']),
+  factory CoreRecordShelf.fromJson(Map<String, dynamic> json) => CoreRecordShelf(
+        colourwayId: '${json['colourwayId']}',
         designCode: _stringOf(json['designCode']),
         recordName: _stringOf(json['recordName']),
         pieceTracked: json['pieceTracked'] == true,
@@ -1945,6 +1986,7 @@ class CoreShelfDraft {
           for (final l in (json['locations'] as List? ?? const []))
             CoreShelfLocation.fromJson((l as Map).cast<String, dynamic>()),
         ],
+        needs: _needsOf(json['needs']),
         blockers: _needsOf(json['blockers']),
       );
 }

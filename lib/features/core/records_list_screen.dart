@@ -80,10 +80,38 @@ class RecordsListScreen extends ConsumerStatefulWidget {
   ConsumerState<RecordsListScreen> createState() => _RecordsListScreenState();
 }
 
+/// The chip row under the search — All, or one slice of the production
+/// pipeline, decided on the phone from the counts each row already carries.
+enum _PipelineFilter {
+  all('All'),
+  inPipeline('In pipeline'),
+  ready('Ready for shelf'),
+  shelved('On shelf');
+
+  const _PipelineFilter(this.label);
+  final String label;
+
+  bool keeps(CoreRecordRow r) => switch (this) {
+        all => true,
+        // Thaans behind it, and not every one of them on the shelf yet.
+        inPipeline => r.thaanCount > 0 && r.shelvedCount < r.thaanCount,
+        ready => r.finishedCount > 0,
+        shelved => r.shelvedCount > 0,
+      };
+
+  String get emptyMessage => switch (this) {
+        all => 'The catalogue is empty.',
+        inPipeline => 'Nothing in the pipeline — no record has Thaans still out.',
+        ready => 'Nothing back from Ironing yet.',
+        shelved => 'Nothing put on the shelf from the pipeline yet.',
+      };
+}
+
 class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
   final _search = TextEditingController();
   String _query = '';
   bool _resolving = false;
+  _PipelineFilter _filter = _PipelineFilter.all;
 
   @override
   void dispose() {
@@ -214,6 +242,25 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
               onSubmitted: (_) => _lookUpTyped(),
             ),
           ),
+          // Where a record's Thaans are — the same counts the row's
+          // subtitle reads, as a filter. Client-side: the list is already
+          // whole, and a chip that asked the server again would lose the
+          // typed search with it.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final f in _PipelineFilter.values)
+                  ChoiceChip(
+                    label: Text(f.label),
+                    selected: _filter == f,
+                    onSelected: (_) => setState(() => _filter = f),
+                  ),
+              ],
+            ),
+          ),
           Expanded(
             child: AsyncView<List<CoreRecordRow>>(
               value: records,
@@ -228,9 +275,10 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
                 nothing in it, and it scrolls like one.
               */
               data: (rows) {
+                final sliced = [for (final r in rows) if (_filter.keeps(r)) r];
                 final shown = _query.isEmpty
-                    ? rows
-                    : [for (final r in rows) if (r.haystack.contains(_query)) r];
+                    ? sliced
+                    : [for (final r in sliced) if (r.haystack.contains(_query)) r];
                 final typed = _search.text.trim();
 
                 return RefreshIndicator(
@@ -244,9 +292,9 @@ class _RecordsListScreenState extends ConsumerState<RecordsListScreen> {
                       if (shown.isEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 40),
-                          child: rows.isEmpty
-                              ? const EmptyState(
-                                  title: 'The catalogue is empty.',
+                          child: sliced.isEmpty
+                              ? EmptyState(
+                                  title: _filter.emptyMessage,
                                   message: 'Pull down to check again.',
                                 )
                               : EmptyState(
@@ -318,9 +366,13 @@ class _Row extends ConsumerWidget {
       if (record.colour != null) record.colour!,
     ].join('  ·  ');
 
+    // "6 Thaans · Nellateeta · needs craft" — only for a record that came
+    // through the pipeline; a record filed at a desk has no Thaans to speak of.
+    final pipelineLine = record.pipeline.line;
+
     return AppListRow(
       title: record.name,
-      subtitle: subtitle,
+      subtitle: pipelineLine == null ? subtitle : '$subtitle\n$pipelineLine',
       // The colour, as a colour. On a hand-painted saree it is the first
       // thing anyone says about the piece.
       leading: RowThumb(

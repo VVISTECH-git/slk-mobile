@@ -137,7 +137,7 @@ const _modules = [
   ),
   _Module(
     'Stock Records',
-    'Scan a piece, count what is here',
+    'Scan a label, see where it is',
     Icons.qr_code_scanner,
     '/core/stock',
     ['Admin'],
@@ -190,13 +190,6 @@ const _modules = [
     Icons.qr_code_scanner,
     '/core/thaans/scan',
     ['Bale Custodian', 'Handler'],
-  ),
-  _Module(
-    'Piles',
-    'What came back from Print, sorted by design',
-    Icons.layers_outlined,
-    '/core/piles',
-    ['Bale Custodian', 'Handler', 'Production Manager', 'Operations Manager'],
   ),
   _Module(
     'Vendor Ledger',

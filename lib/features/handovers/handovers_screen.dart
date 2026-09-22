@@ -1,13 +1,12 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../../models/core.dart';
 import '../../widgets/ui/ui.dart';
-import '../piles/pile_providers.dart';
+import '../core/core_auth.dart' show coreOptionsProvider;
+import '../core/pipeline_providers.dart';
+import '../core/record_fields.dart' show narrow;
+import '../core/records_list_screen.dart' show coreRecordsProvider;
 import '../production/continuous_scanner.dart';
 import 'handover_providers.dart';
 
@@ -420,86 +419,96 @@ class _ReceivePanel extends ConsumerStatefulWidget {
   ConsumerState<_ReceivePanel> createState() => _ReceivePanelState();
 }
 
-/// A pile being filled in this receive — one that already exists on the
-/// server (made at Print, now getting its Nellateeta delivery) or one made
-/// at the door just now, which the server only learns of when the batch is
-/// confirmed. Holds the Thaans scanned into it so far.
-class _SessionPile {
-  _SessionPile.existing(CorePile pile)
-      : pileId = pile.id,
-        code = pile.code,
-        name = pile.name,
-        colourId = pile.mainColourId,
-        colourLabel = pile.mainColour,
-        photoKey = null,
-        photoFile = null,
-        photoUrl = pile.photoUrl;
+/// One group in a receive: the Thaans that share a colour and a motif. Either
+/// a record that already exists on the server (a later delivery of a
+/// colourway made at Print) or one to make right now, which the server
+/// only learns of when the batch is confirmed.
+class _RecordGroup {
+  _RecordGroup.existing(CorePipelineRecord record)
+      : colourwayId = record.id,
+        code = record.code,
+        colourId = null,
+        colourLabel = record.colour,
+        secondaryColourId = null,
+        secondaryColourLabel = null,
+        motifCategoryId = null,
+        motifCategoryLabel = record.motifCategory,
+        motifId = null,
+        motifLabel = record.motif,
+        existingCount = record.thaanCount;
 
-  _SessionPile.fresh({
-    required this.name,
-    required this.colourId,
+  _RecordGroup.fresh({
+    required String this.colourId,
     required this.colourLabel,
-    required this.photoKey,
-    required this.photoFile,
-  })  : pileId = null,
+    required this.secondaryColourId,
+    required this.secondaryColourLabel,
+    required String this.motifCategoryId,
+    required this.motifCategoryLabel,
+    required String this.motifId,
+    required this.motifLabel,
+  })  : colourwayId = null,
         code = null,
-        photoUrl = null;
+        existingCount = 0;
 
-  /// Null until the server makes it — i.e. for a pile made in this session.
-  final String? pileId;
+  /// Null until the server makes it — i.e. for a record made in this session.
+  final String? colourwayId;
   final String? code;
-  final String name;
   final String? colourId;
   final String? colourLabel;
+  final String? secondaryColourId;
+  final String? secondaryColourLabel;
+  final String? motifCategoryId;
+  final String? motifCategoryLabel;
+  final String? motifId;
+  final String? motifLabel;
 
-  /// The uploaded photo's key, for a new pile; an existing pile already has
-  /// its photo on the server.
-  final String? photoKey;
-  final File? photoFile;
-  final String? photoUrl;
+  /// Thaans already in an existing record, before this delivery.
+  final int existingCount;
 
-  final thaans = <CoreThaanForReceive>[];
+  bool get isNew => colourwayId == null;
 
-  bool get isNew => pileId == null;
-
-  /// The Thaans that will actually go in this pile — the rest are received
-  /// without one, because they're not back from Print yet.
-  List<CoreThaanForReceive> get pileable => [for (final t in thaans) if (t.canPile) t];
-
-  String get label => colourLabel == null || colourLabel!.isEmpty ? name : '$name · $colourLabel';
-
-  ImageProvider? get image {
-    if (photoFile != null) return FileImage(photoFile!);
-    if (photoUrl != null) return NetworkImage(photoUrl!);
-    return null;
+  /// "Red · Peacock", or "Red / Gold · Peacock" with a secondary colour —
+  /// how the group is named everywhere on the panel.
+  String get label {
+    final colour = [
+      if (colourLabel != null && colourLabel!.isNotEmpty) colourLabel!,
+      if (secondaryColourLabel != null && secondaryColourLabel!.isNotEmpty) secondaryColourLabel!,
+    ].join(' / ');
+    final motif = motifLabel ?? motifCategoryLabel;
+    final parts = [
+      if (colour.isNotEmpty) colour,
+      if (motif != null && motif.isNotEmpty) motif,
+    ];
+    if (parts.isEmpty) return code ?? 'Record';
+    return parts.join(' · ');
   }
+
+  /// A short version for the row's trailing button, where there is no room
+  /// for a sentence.
+  String get shortLabel => code ?? label;
 }
 
 class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
   final _items = <CoreThaanForReceive>[];
   bool _busy = false;
 
-  /// Receive as: just Thaans (the batch in [_items]) or in piles (the
-  /// batches in [_piles]). Switching clears whichever was in progress — a
-  /// batch scanned without piles can't be sorted into them after the fact,
-  /// since which pile each Thaan belongs in is only known at the door with
-  /// the cloth in hand.
-  bool _inPiles = false;
-  final _piles = <_SessionPile>[];
-  int _active = -1;
+  /// The groups made or picked in this receive, and which group each
+  /// eligible Thaan is sorted into (by Thaan id; absent means none).
+  final _groups = <_RecordGroup>[];
+  final _assignment = <String, int>{};
 
-  List<CoreThaanForReceive> get _pileItems => [for (final p in _piles) ...p.thaans];
+  /// The Thaans this receive is allowed to sort — back from Print or later.
+  List<CoreThaanForReceive> get _eligible => [for (final t in _items) if (t.canRecord) t];
 
   /// Resolves each newly scanned code against `/handovers/lookup-receive`,
-  /// skipping any already in [already]. Shared by both modes so a Thaan
-  /// answers the same way whichever way it's being received.
-  Future<_ScanOutcome<CoreThaanForReceive>> _resolve(List<String> codes, Iterable<CoreThaanForReceive> already) async {
+  /// skipping any already in the batch.
+  Future<_ScanOutcome<CoreThaanForReceive>> _resolve(List<String> codes) async {
     final repo = ref.read(handoverRepositoryProvider);
     final resolved = <CoreThaanForReceive>[];
     final problems = <ScanProblem>[];
 
     for (final code in codes) {
-      if (already.any((t) => t.code == code) || resolved.any((t) => t.code == code)) continue;
+      if (_items.any((t) => t.code == code) || resolved.any((t) => t.code == code)) continue;
       try {
         resolved.add(await repo.lookupForReceive(code));
       } catch (e) {
@@ -512,13 +521,16 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
   Future<void> _scan() async {
     final codes = await Navigator.of(context).push<List<String>>(
       MaterialPageRoute(
-        builder: (_) => const ContinuousScanScreen(title: "Scan what's coming back"),
+        builder: (_) => ContinuousScanScreen(
+          title: "Scan what's coming back",
+          already: {for (final t in _items) t.code},
+        ),
       ),
     );
     if (codes == null || codes.isEmpty || !mounted) return;
 
     setState(() => _busy = true);
-    final outcome = await _resolve(codes, _items);
+    final outcome = await _resolve(codes);
 
     if (!mounted) return;
     setState(() {
@@ -530,14 +542,151 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     }
   }
 
+  void _clear() => setState(() {
+        _items.clear();
+        _groups.clear();
+        _assignment.clear();
+      });
+
+  void _removeItem(int i) => setState(() {
+        _assignment.remove(_items[i].id);
+        _items.removeAt(i);
+      });
+
+  /// Drops a group; whatever was sorted into it becomes unsorted again, and
+  /// the groups after it shift down one.
+  void _removeGroup(int index) => setState(() {
+        _groups.removeAt(index);
+        for (final id in _assignment.keys.toList()) {
+          final g = _assignment[id]!;
+          if (g == index) {
+            _assignment.remove(id);
+          } else if (g > index) {
+            _assignment[id] = g - 1;
+          }
+        }
+      });
+
+  /// "New group": the sheet hands back a group (made here, or one of the
+  /// records already in the pipeline). With a [forThaan], that Thaan is
+  /// sorted into it straight away.
+  Future<int?> _newGroup({CoreThaanForReceive? forThaan}) async {
+    final group = await showAppSheet<_RecordGroup>(
+      context,
+      title: 'New group',
+      subtitle: 'The Thaans that share one colour and one motif become one record.',
+      child: _GroupSheet(
+        excludeIds: {for (final g in _groups) if (g.colourwayId != null) g.colourwayId!},
+      ),
+    );
+    if (group == null || !mounted) return null;
+    setState(() {
+      _groups.add(group);
+      if (forThaan != null) _assignment[forThaan.id] = _groups.length - 1;
+    });
+    return _groups.length - 1;
+  }
+
+  /// Which group [t] goes in — one of those made so far, none, or a new
+  /// one made right here.
+  Future<void> _pickGroupFor(CoreThaanForReceive t) async {
+    final current = _assignment[t.id];
+    final picked = await showAppSheet<int>(
+      context,
+      title: 'Sort ${t.code}',
+      subtitle: t.recordLabel == null ? 'Not in a record yet.' : 'Now in ${t.recordLabel}.',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_groups.isEmpty)
+            const InlineNotice('No groups yet — make one for this Thaan.')
+          else
+            AppListGroup(
+              children: [
+                for (final (i, g) in _groups.indexed)
+                  AppListRow(
+                    title: g.label,
+                    subtitle: _groupSubtitle(g),
+                    selected: i == current,
+                    trailing: i == current ? Icon(Icons.check, color: context.p.primary) : null,
+                    onTap: () => Navigator.pop(context, i),
+                  ),
+                AppListRow(
+                  title: 'None',
+                  subtitle: 'Receive it without sorting',
+                  selected: current == null,
+                  trailing: current == null ? Icon(Icons.check, color: context.p.primary) : null,
+                  onTap: () => Navigator.pop(context, -1),
+                ),
+              ],
+            ),
+          const SizedBox(height: 12),
+          AppButton.secondary(
+            label: 'New group',
+            icon: Icons.add,
+            onPressed: () => Navigator.pop(context, -2),
+          ),
+        ],
+      ),
+    );
+    if (picked == null || !mounted) return;
+    if (picked == -2) {
+      await _newGroup(forThaan: t);
+      return;
+    }
+    setState(() {
+      if (picked < 0) {
+        _assignment.remove(t.id);
+      } else {
+        _assignment[t.id] = picked;
+      }
+    });
+  }
+
+  int _countIn(int index) => _assignment.values.where((g) => g == index).length;
+
+  String _groupSubtitle(_RecordGroup g) {
+    final n = _countIn(_groups.indexOf(g));
+    return [
+      '$n Thaan${n == 1 ? '' : 's'} here',
+      g.isNew ? 'new record' : '${g.code} · ${g.existingCount} already',
+    ].join(' · ');
+  }
+
   Future<void> _confirmReceive() async {
     if (_items.isEmpty) return;
 
+    final specs = <ReceiveRecordSpec>[];
+    final lines = <String>[];
+    for (final (i, g) in _groups.indexed) {
+      final ids = [
+        for (final t in _eligible)
+          if (_assignment[t.id] == i) t.id,
+      ];
+      if (ids.isEmpty) continue;
+      specs.add(ReceiveRecordSpec(
+        colourwayId: g.colourwayId,
+        newRecord: g.isNew
+            ? (
+                colourId: g.colourId!,
+                secondaryColourId: g.secondaryColourId,
+                motifCategoryId: g.motifCategoryId!,
+                motifId: g.motifId!,
+              )
+            : null,
+        thaanIds: ids,
+      ));
+      lines.add('${g.label} — ${ids.length} Thaan${ids.length == 1 ? '' : 's'}${g.isNew ? ' (new record)' : ''}');
+    }
+    final sorted = specs.fold<int>(0, (n, s) => n + s.thaanIds.length);
+    final plain = _items.length - sorted;
+    if (plain > 0 && specs.isNotEmpty) lines.add('$plain received without a record');
+
     // Named when the whole batch is coming back from one stage — the usual
     // case, and the fact that actually matters to whoever is confirming
-    // this. A mixed batch (allowed — see the panel's own copy above) falls
-    // back to just the count, since no single stage name would be true of
-    // all of them.
+    // this. A mixed batch falls back to just the count, since no single
+    // stage name would be true of all of them.
     final stages = _items.map((t) => tripLabel(t.stage, t.throughStage)).toSet();
     final title = stages.length == 1
         ? 'Receiving ${_items.length} Thaan${_items.length == 1 ? '' : 's'} after ${stages.first}?'
@@ -546,105 +695,9 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     final ok = await showConfirmDialog(
       context,
       title: title,
-      message: 'Confirm all of these are physically back in hand.',
-      confirmLabel: 'Receive',
-    );
-    if (!ok || !mounted) return;
-
-    setState(() => _busy = true);
-    try {
-      final message = await ref.read(handoverRepositoryProvider).receiveBatch([for (final t in _items) t.id]);
-      if (!mounted) return;
-      showOk(context, message);
-      setState(() => _items.clear());
-    } catch (e) {
-      if (mounted) showError(context, e);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  // ── In piles ──
-
-  void _switchMode(bool inPiles) {
-    if (inPiles == _inPiles) return;
-    setState(() {
-      _inPiles = inPiles;
-      _items.clear();
-      _piles.clear();
-      _active = -1;
-    });
-  }
-
-  /// "New pile" / "Next pile": the sheet hands back a pile (made here or
-  /// picked from the drafts), which becomes the active one and opens the
-  /// scanner straight away — the reader has the cloth in hand.
-  Future<void> _newPile() async {
-    final pile = await showAppSheet<_SessionPile>(
-      context,
-      title: _piles.isEmpty ? 'New pile' : 'Next pile',
-      subtitle: 'One design, one colour combination — photograph one Thaan of it.',
-      child: _PileSheet(
-        excludePileIds: {for (final p in _piles) if (p.pileId != null) p.pileId!},
-      ),
-    );
-    if (pile == null || !mounted) return;
-    setState(() {
-      _piles.add(pile);
-      _active = _piles.length - 1;
-    });
-    await _scanIntoActive();
-  }
-
-  Future<void> _scanIntoActive() async {
-    if (_active < 0 || _active >= _piles.length) return;
-    final pile = _piles[_active];
-    final codes = await Navigator.of(context).push<List<String>>(
-      MaterialPageRoute(
-        builder: (_) => ContinuousScanScreen(
-          title: 'Scan into ${pile.name}',
-          already: {for (final t in _pileItems) t.code},
-        ),
-      ),
-    );
-    if (codes == null || codes.isEmpty || !mounted) return;
-
-    setState(() => _busy = true);
-    final outcome = await _resolve(codes, _pileItems);
-
-    if (!mounted) return;
-    setState(() {
-      pile.thaans.addAll(outcome.resolved);
-      _busy = false;
-    });
-    if (outcome.problems.isNotEmpty) {
-      _showProblemsSheet(context, title: 'Not received', problems: outcome.problems);
-    }
-  }
-
-  Future<void> _confirmReceivePiles() async {
-    final all = _pileItems;
-    if (all.isEmpty) return;
-
-    final specs = <ReceivePileSpec>[];
-    final lines = <String>[];
-    for (final p in _piles) {
-      final ids = [for (final t in p.pileable) t.id];
-      if (ids.isEmpty) continue;
-      specs.add(ReceivePileSpec(
-        pileId: p.pileId,
-        newPile: p.isNew ? (name: p.name, mainColourId: p.colourId ?? '', photoKey: p.photoKey ?? '') : null,
-        thaanIds: ids,
-      ));
-      lines.add('${p.label} — ${ids.length} Thaan${ids.length == 1 ? '' : 's'}${p.isNew ? ' (new)' : ''}');
-    }
-    final loose = all.length - specs.fold<int>(0, (n, s) => n + s.thaanIds.length);
-    if (loose > 0) lines.add('$loose without a pile — not back from Print yet');
-
-    final ok = await showConfirmDialog(
-      context,
-      title: 'Receive ${all.length} Thaan${all.length == 1 ? '' : 's'} in ${specs.length} pile${specs.length == 1 ? '' : 's'}?',
-      message: '${lines.map((l) => '• $l').join('\n')}\n\nAll piles go in as one delivery, one bill.',
+      message: specs.isEmpty
+          ? 'Confirm all of these are physically back in hand.'
+          : '${lines.map((l) => '• $l').join('\n')}\n\nAll of it goes in as one delivery, one bill.',
       confirmLabel: 'Receive',
     );
     if (!ok || !mounted) return;
@@ -652,28 +705,15 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     setState(() => _busy = true);
     try {
       final message = await ref.read(handoverRepositoryProvider).receiveBatch(
-            [for (final t in all) t.id],
-            piles: specs,
+            [for (final t in _items) t.id],
+            records: specs,
           );
       if (!mounted) return;
       showOk(context, message);
-      setState(() {
-        _piles.clear();
-        _active = -1;
-      });
-      // The piles are in; their details (motif, craft, colours) are not.
-      // Offer to go and fill them in now, while the Thaans are in hand —
-      // or not: "Later" leaves them on the Piles list under "To complete".
+      _clear();
       if (specs.isNotEmpty) {
-        ref.invalidate(pilesProvider);
-        final now = await showConfirmDialog(
-          context,
-          title: 'Fill in the details now?',
-          message: 'Motif, craft, colours — one pile at a time.',
-          confirmLabel: 'Yes',
-          cancelLabel: 'Later',
-        );
-        if (now && mounted) context.push('/core/piles');
+        ref.invalidate(pipelineRecordsProvider);
+        ref.invalidate(coreRecordsProvider);
       }
     } catch (e) {
       if (mounted) showError(context, e);
@@ -684,14 +724,8 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
 
   @override
   Widget build(BuildContext context) {
-    final receiveAs = Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: _ReceiveAsToggle(inPiles: _inPiles, onChanged: _busy ? null : _switchMode),
-    );
-    return _inPiles ? _buildPiles(receiveAs) : _buildJustThaans(receiveAs);
-  }
+    final canSort = _eligible.isNotEmpty;
 
-  Widget _buildJustThaans(Widget receiveAs) {
     return AppPage(
       title: 'Handovers',
       actions: const [ThemeButton()],
@@ -699,7 +733,6 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
       body: Column(
         children: [
           widget.toggle,
-          receiveAs,
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: InlineNotice(
@@ -712,7 +745,7 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
               child: SectionHeader(
                 'Scanned',
                 top: 0,
-                trailing: AppButton.ghost(label: 'Clear', compact: true, onPressed: () => setState(_items.clear)),
+                trailing: AppButton.ghost(label: 'Clear', compact: true, onPressed: _busy ? null : _clear),
               ),
             ),
           Expanded(
@@ -723,19 +756,19 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
                     children: [
                       AppListGroup(
                         children: [
-                          for (final (i, t) in _items.indexed)
-                            AppListRow(
-                              title: t.code,
-                              titleMono: true,
-                              subtitle: '${t.baleCode} · ${t.vendorName} — ${tripLabel(t.stage, t.throughStage)}',
-                              trailing: AppIconButton(
-                                icon: Icons.close,
-                                tooltip: 'Remove',
-                                onPressed: () => setState(() => _items.removeAt(i)),
-                              ),
-                            ),
+                          for (final (i, t) in _items.indexed) _thaanRow(i, t),
                         ],
                       ),
+                      if (canSort) ...[
+                        const SizedBox(height: 12),
+                        _SortCard(
+                          groups: _groups,
+                          countIn: _countIn,
+                          unsorted: _eligible.where((t) => _assignment[t.id] == null).length,
+                          onNewGroup: _busy ? null : () => _newGroup(),
+                          onRemoveGroup: _busy ? null : _removeGroup,
+                        ),
+                      ],
                     ],
                   ),
           ),
@@ -757,382 +790,243 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     );
   }
 
-  Widget _buildPiles(Widget receiveAs) {
-    final active = _active >= 0 && _active < _piles.length ? _piles[_active] : null;
-    final total = _pileItems.length;
+  /// One scanned Thaan. Back from Print or later, it carries a group
+  /// picker; earlier than that it is received as it is, and says so only
+  /// when there is sorting going on around it.
+  Widget _thaanRow(int i, CoreThaanForReceive t) {
+    final group = _assignment[t.id];
+    final g = group == null ? null : _groups[group];
+    final subtitle = [
+      '${t.baleCode} · ${t.vendorName} — ${tripLabel(t.stage, t.throughStage)}',
+      // Where it's moving from, when it already sits in a different record.
+      if (t.canRecord && t.colourwayId != null && g != null && g.colourwayId != t.colourwayId)
+        'moving from ${t.recordLabel}',
+    ].join(' · ');
 
-    return AppPage(
-      title: 'Handovers',
-      actions: const [ThemeButton()],
-      padded: false,
-      body: Column(
+    return AppListRow(
+      title: t.code,
+      titleMono: true,
+      subtitle: subtitle,
+      onTap: t.canRecord && !_busy ? () => _pickGroupFor(t) : null,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          widget.toggle,
-          receiveAs,
-          Expanded(
-            child: _piles.isEmpty
-                ? ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      const InlineNotice(
-                        'Make a pile for the first design in this delivery, then scan its Thaans into it. '
-                        'Anything not back from Print yet is received without a pile.',
-                      ),
-                      const EmptyState(
-                        title: 'No pile yet.',
-                        message: 'Photograph one Thaan, name the pile, pick its main colour.',
-                        icon: Icons.layers_outlined,
-                      ),
-                      AppButton.primary(
-                        label: 'New pile',
-                        icon: Icons.add,
-                        onPressed: _busy ? null : _newPile,
-                      ),
-                    ],
-                  )
-                : ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                    children: [
-                      if (active != null) ...[
-                        _ActivePileCard(pile: active),
-                        SectionHeader(
-                          'In this pile',
-                          trailing: Text('${active.thaans.length}'),
-                        ),
-                        if (active.thaans.isEmpty)
-                          const EmptyState(compact: true, title: 'Nothing scanned into it yet.', icon: Icons.qr_code_scanner)
-                        else
-                          AppListGroup(
-                            children: [
-                              for (final (i, t) in active.thaans.indexed)
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                                  children: [
-                                    AppListRow(
-                                      title: t.code,
-                                      titleMono: true,
-                                      subtitle: _pileRowSubtitle(t, active),
-                                      trailing: AppIconButton(
-                                        icon: Icons.close,
-                                        tooltip: 'Remove',
-                                        onPressed: () => setState(() => active.thaans.removeAt(i)),
-                                      ),
-                                    ),
-                                    if (!t.canPile)
-                                      Padding(
-                                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                                        child: InlineNotice(
-                                          '${t.code} is not back from Print — it will be received without a pile.',
-                                          warning: true,
-                                          icon: Icons.error_outline,
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                            ],
-                          ),
-                      ],
-                      SectionHeader(
-                        'Piles',
-                        trailing: AppButton.ghost(
-                          label: 'Clear',
-                          compact: true,
-                          onPressed: _busy
-                              ? null
-                              : () => setState(() {
-                                    _piles.clear();
-                                    _active = -1;
-                                  }),
-                        ),
-                      ),
-                      AppListGroup(
-                        children: [
-                          for (final (i, p) in _piles.indexed)
-                            AppListRow(
-                              leading: RowThumb(image: p.image, icon: p.image == null ? Icons.layers_outlined : null),
-                              title: p.name,
-                              subtitle: [
-                                if (p.colourLabel != null && p.colourLabel!.isNotEmpty) p.colourLabel!,
-                                p.isNew ? 'new' : (p.code ?? 'existing'),
-                              ].join(' · '),
-                              selected: i == _active,
-                              trailing: Text(
-                                '${p.thaans.length}',
-                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: context.p.text),
-                              ),
-                              onTap: () => setState(() => _active = i),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      AppButton.secondary(
-                        label: 'Next pile',
-                        icon: Icons.add,
-                        onPressed: _busy ? null : _newPile,
-                      ),
-                    ],
-                  ),
+          if (t.canRecord)
+            AppButton.ghost(
+              label: g?.shortLabel ?? 'Sort…',
+              icon: Icons.expand_more,
+              compact: true,
+              onPressed: _busy ? null : () => _pickGroupFor(t),
+            ),
+          AppIconButton(
+            icon: Icons.close,
+            tooltip: 'Remove',
+            onPressed: _busy ? null : () => _removeItem(i),
           ),
         ],
       ),
-      bottomBar: BottomActionBar(
-        secondary: AppButton.secondary(
-          label: active == null ? 'Scan' : 'Scan into pile',
-          icon: Icons.qr_code_scanner,
-          onPressed: _busy || active == null ? null : _scanIntoActive,
-        ),
-        primary: AppButton.primary(
-          label: 'Receive${total > 0 ? ' $total' : ''}',
-          icon: Icons.south_west,
-          busy: _busy,
-          onPressed: total == 0 ? null : _confirmReceivePiles,
-        ),
-      ),
-    );
-  }
-
-  /// The row's second line: bale, vendor and trip as in Just Thaans, plus
-  /// where it's moving from when it already sits in a different pile.
-  static String _pileRowSubtitle(CoreThaanForReceive t, _SessionPile pile) {
-    final base = '${t.baleCode} · ${t.vendorName} — ${tripLabel(t.stage, t.throughStage)}';
-    if (t.pileId != null && t.pileId != pile.pileId && t.canPile) {
-      return '$base · moving from ${t.pileName ?? t.pileCode ?? 'another pile'}';
-    }
-    return base;
-  }
-}
-
-/// Just Thaans | In piles — the Receive panel's own two-way switch, the
-/// same shape as Send | Receive above it.
-class _ReceiveAsToggle extends StatelessWidget {
-  const _ReceiveAsToggle({required this.inPiles, required this.onChanged});
-  final bool inPiles;
-  final ValueChanged<bool>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const FieldLabel('Receive as'),
-        const SizedBox(height: 6),
-        SizedBox(
-          width: double.infinity,
-          child: SegmentedButton<bool>(
-            style: SegmentedButton.styleFrom(minimumSize: const Size(0, 48)),
-            segments: const [
-              ButtonSegment(value: false, label: Text('Just Thaans'), icon: Icon(Icons.view_list_outlined)),
-              ButtonSegment(value: true, label: Text('In piles'), icon: Icon(Icons.layers_outlined)),
-            ],
-            selected: {inPiles},
-            onSelectionChanged: onChanged == null ? null : (s) => onChanged!(s.first),
-          ),
-        ),
-      ],
     );
   }
 }
 
-/// The pile being scanned into, pinned at the top: its photo, name and
-/// colour, and the count going up as the reader scans.
-class _ActivePileCard extends StatelessWidget {
-  const _ActivePileCard({required this.pile});
-  final _SessionPile pile;
+/// "Sort into records" — the groups made in this receive, how many Thaans
+/// each has so far, and the way to make another.
+class _SortCard extends StatelessWidget {
+  const _SortCard({
+    required this.groups,
+    required this.countIn,
+    required this.unsorted,
+    required this.onNewGroup,
+    required this.onRemoveGroup,
+  });
+
+  final List<_RecordGroup> groups;
+  final int Function(int index) countIn;
+  final int unsorted;
+  final VoidCallback? onNewGroup;
+  final ValueChanged<int>? onRemoveGroup;
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
-    final n = pile.thaans.length;
     return AppCard(
       emphasis: true,
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          RowThumb(size: 64, image: pile.image, icon: pile.image == null ? Icons.layers_outlined : null),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          CardTitle(
+            'Sort into records',
+            subtitle: unsorted == 0
+                ? 'Every Thaan back from Print has a group.'
+                : '$unsorted back from Print still unsorted — tap a Thaan to sort it.',
+          ),
+          const SizedBox(height: 10),
+          if (groups.isEmpty)
+            const InlineNotice(
+              'Pick a colour and a motif for the first design in this delivery, then tap each Thaan of it.',
+              icon: Icons.palette_outlined,
+            )
+          else
+            AppListGroup(
               children: [
-                Text(pile.name, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: p.text)),
-                const SizedBox(height: 2),
-                Text(
-                  [
-                    if (pile.colourLabel != null && pile.colourLabel!.isNotEmpty) pile.colourLabel!,
-                    pile.isNew ? 'New pile' : 'Pile ${pile.code ?? ''}'.trim(),
-                  ].join(' · '),
-                  style: TextStyle(fontSize: 13, color: p.textSecondary),
-                ),
+                for (final (i, g) in groups.indexed)
+                  AppListRow(
+                    dense: true,
+                    title: g.label,
+                    subtitle: [
+                      '${countIn(i)} Thaan${countIn(i) == 1 ? '' : 's'}',
+                      g.isNew ? 'new record' : '${g.code} · ${g.existingCount} already',
+                    ].join(' · '),
+                    trailing: AppIconButton(
+                      icon: Icons.close,
+                      tooltip: 'Remove group',
+                      onPressed: onRemoveGroup == null ? null : () => onRemoveGroup!(i),
+                    ),
+                  ),
               ],
             ),
-          ),
-          const SizedBox(width: 12),
-          StatTile(value: '$n', label: n == 1 ? 'Thaan' : 'Thaans', tone: BadgeTone.brand),
+          const SizedBox(height: 12),
+          AppButton.secondary(label: 'New group', icon: Icons.add, onPressed: onNewGroup),
         ],
       ),
     );
   }
 }
 
-/// New pile: a photo of one Thaan (uploaded the moment it's taken, so the
-/// key is ready when the batch is confirmed), a name and the main colour —
-/// or one of the draft piles already on the server, for a delivery that's
-/// going into piles made at Print. Pops with the [_SessionPile] to scan
-/// into. Rendered inside [showAppSheet].
-class _PileSheet extends ConsumerStatefulWidget {
-  const _PileSheet({required this.excludePileIds});
+/// New group: a colour, an optional secondary colour, a motif category and
+/// a motif from the Master Lists — or one of the records already in the
+/// pipeline, for a delivery that's going into colourways made at Print.
+/// Pops with the [_RecordGroup]. Rendered inside [showAppSheet].
+class _GroupSheet extends ConsumerStatefulWidget {
+  const _GroupSheet({required this.excludeIds});
 
-  /// Draft piles already in this session — offered once, not twice.
-  final Set<String> excludePileIds;
+  /// Records already grouped in this session — offered once, not twice.
+  final Set<String> excludeIds;
 
   @override
-  ConsumerState<_PileSheet> createState() => _PileSheetState();
+  ConsumerState<_GroupSheet> createState() => _GroupSheetState();
 }
 
-class _PileSheetState extends ConsumerState<_PileSheet> {
-  final _name = TextEditingController();
+class _GroupSheetState extends ConsumerState<_GroupSheet> {
   String? _colourId;
-  File? _photo;
-  String? _photoKey;
-  bool _uploading = false;
+  String? _secondaryColourId;
+  String? _motifCategoryId;
+  String? _motifId;
 
-  @override
-  void dispose() {
-    _name.dispose();
-    super.dispose();
-  }
+  bool get _canAdd => _colourId != null && _motifCategoryId != null && _motifId != null;
 
-  Future<void> _takePhoto() async {
-    final shot = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 70, maxWidth: 1600);
-    if (shot == null || !mounted) return;
-    final file = File(shot.path);
-    setState(() {
-      _photo = file;
-      _photoKey = null;
-      _uploading = true;
-    });
-    try {
-      final key = await ref.read(pileRepositoryProvider).uploadPhoto(file);
-      if (!mounted) return;
-      setState(() => _photoKey = key);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _photo = null);
-      showError(context, e);
-    } finally {
-      if (mounted) setState(() => _uploading = false);
+  static String? _labelOf(List<CoreOption>? values, String? id) {
+    if (id == null) return null;
+    for (final v in values ?? const <CoreOption>[]) {
+      if (v.id == id) return v.label;
     }
+    return null;
   }
 
-  // A photo is what makes a pile easy to recognise later, but a camera that
-  // will not open must not stop a delivery being received: name and colour
-  // are enough to start, and the photo can be added on the web.
-  bool get _canStart => _name.text.trim().isNotEmpty && _colourId != null && !_uploading;
+  static List<PickerOption> _pickOptions(List<CoreOption> values) => [
+        for (final v in values) PickerOption(v.id, v.label, color: v.swatch),
+      ];
 
-  void _start(List<CoreColour> colours) {
-    final label = colours.where((c) => c.id == _colourId).map((c) => c.label).firstOrNull;
+  void _add(CoreOptions o) {
     Navigator.pop(
       context,
-      _SessionPile.fresh(
-        name: _name.text.trim(),
-        colourId: _colourId,
-        colourLabel: label,
-        photoKey: _photoKey,
-        photoFile: _photo,
+      _RecordGroup.fresh(
+        colourId: _colourId!,
+        colourLabel: _labelOf(o['colour'], _colourId),
+        secondaryColourId: _secondaryColourId,
+        secondaryColourLabel: _labelOf(o['colour'], _secondaryColourId),
+        motifCategoryId: _motifCategoryId!,
+        motifCategoryLabel: _labelOf(o['motif_category'], _motifCategoryId),
+        motifId: _motifId!,
+        motifLabel: _labelOf(o['motif'], _motifId),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final p = context.p;
-    final colours = ref.watch(pileColoursProvider);
-    final drafts = ref.watch(pilesProvider('draft'));
-
-    final photoLine = _uploading
-        ? 'Uploading…'
-        : _photoKey != null
-            ? 'Photo taken — tap to retake'
-            : 'Tap to photograph one Thaan of this design';
+    final options = ref.watch(coreOptionsProvider);
+    final records = ref.watch(pipelineRecordsProvider('in_pipeline'));
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const FieldLabel('Photo', required: true),
-        const SizedBox(height: 6),
-        AppCard(
-          onTap: _uploading ? null : _takePhoto,
-          child: Row(
-            children: [
-              RowThumb(
-                size: 64,
-                image: _photo == null ? null : FileImage(_photo!),
-                icon: _photo == null ? Icons.photo_camera_outlined : null,
-              ),
-              const SizedBox(width: 12),
-              Expanded(child: Text(photoLine, style: TextStyle(fontSize: 14, color: p.textSecondary))),
-              if (_uploading)
-                SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.2, color: p.primary))
-              else if (_photoKey != null)
-                Icon(Icons.check_circle, color: p.success),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        AppTextField(
-          label: 'Name',
-          required: true,
-          hint: 'e.g. Peacock florals',
-          controller: _name,
-          textCapitalization: TextCapitalization.sentences,
-          textInputAction: TextInputAction.done,
-          onChanged: (_) => setState(() {}),
-        ),
-        const SizedBox(height: 12),
-        colours.when(
-          loading: () => const Skeleton(height: 48, radius: 12),
+        options.when(
+          loading: () => const LoadingState(rows: 4),
           error: (e, _) => InlineNotice('$e', icon: Icons.cloud_off_outlined, warning: true),
-          data: (rows) => PickerField(
-            label: 'Main colour',
-            required: true,
-            value: _colourId,
-            hint: 'Choose…',
-            options: [for (final c in rows) PickerOption(c.id, c.label, color: colourSwatch(c.label))],
-            onChanged: (v) => setState(() => _colourId = v),
-          ),
+          data: (o) {
+            final colours = _pickOptions(o['colour'] ?? const []);
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                PickerField(
+                  label: 'Colour',
+                  required: true,
+                  value: _colourId,
+                  hint: 'Choose…',
+                  options: colours,
+                  onChanged: (v) => setState(() => _colourId = v),
+                ),
+                const SizedBox(height: 12),
+                PickerField(
+                  label: 'Secondary colour',
+                  value: _secondaryColourId,
+                  hint: 'None',
+                  allowClear: true,
+                  options: colours,
+                  onChanged: (v) => setState(() => _secondaryColourId = v),
+                ),
+                const SizedBox(height: 12),
+                PickerField(
+                  label: 'Motif category',
+                  required: true,
+                  value: _motifCategoryId,
+                  hint: 'Choose…',
+                  options: _pickOptions(o['motif_category'] ?? const []),
+                  onChanged: (v) => setState(() {
+                    // A re-confirm is not a change; a change clears the motif.
+                    if (_motifCategoryId == v) return;
+                    _motifCategoryId = v;
+                    _motifId = null;
+                  }),
+                ),
+                const SizedBox(height: 12),
+                PickerField(
+                  label: 'Motif',
+                  required: true,
+                  value: _motifId,
+                  hint: _motifCategoryId == null ? 'Pick a category first' : 'Choose…',
+                  options: _pickOptions(narrow(o['motif'], _motifCategoryId)),
+                  onChanged: (v) => setState(() => _motifId = v),
+                ),
+                const SizedBox(height: 16),
+                AppButton.primary(
+                  label: 'Add group',
+                  icon: Icons.add,
+                  onPressed: _canAdd ? () => _add(o) : null,
+                ),
+              ],
+            );
+          },
         ),
-        const SizedBox(height: 16),
-        AppButton.primary(
-          label: 'Start scanning this pile',
-          icon: Icons.qr_code_scanner,
-          busy: _uploading,
-          onPressed: _canStart ? () => _start(colours.value ?? const []) : null,
-        ),
-        const SectionHeader('Use an existing pile', top: 20),
-        drafts.when(
+        const SectionHeader('Or an existing record', top: 20),
+        records.when(
           loading: () => const LoadingState(rows: 3),
           error: (e, _) => InlineNotice('$e', icon: Icons.cloud_off_outlined, warning: true),
           data: (rows) {
-            final offered = [for (final d in rows) if (!widget.excludePileIds.contains(d.id)) d];
+            final offered = [for (final r in rows) if (!widget.excludeIds.contains(r.id)) r];
             if (offered.isEmpty) {
-              return const InlineNotice('No draft piles waiting — every delivery into piles starts with a new one.');
+              return const InlineNotice('Nothing in the pipeline right now — every delivery starts with a new group.');
             }
             return AppListGroup(
               children: [
-                for (final d in offered)
+                for (final r in offered)
                   AppListRow(
-                    leading: RowThumb(
-                      image: d.photoUrl == null ? null : NetworkImage(d.photoUrl!),
-                      icon: d.photoUrl == null ? Icons.layers_outlined : null,
-                    ),
-                    title: d.name,
-                    subtitle: [
-                      if (d.mainColour != null && d.mainColour!.isNotEmpty) d.mainColour!,
-                      '${d.thaanCount} Thaan${d.thaanCount == 1 ? '' : 's'}',
-                      if (d.createdStage != null) 'from ${d.createdStage}',
-                    ].join(' · '),
+                    leading: RowThumb(color: r.swatch, icon: r.swatch == null ? Icons.palette_outlined : null),
+                    title: r.name,
+                    subtitle: r.summary,
                     chevron: true,
-                    onTap: () => Navigator.pop(context, _SessionPile.existing(d)),
+                    onTap: () => Navigator.pop(context, _RecordGroup.existing(r)),
                   ),
               ],
             );

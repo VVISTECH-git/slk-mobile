@@ -15,10 +15,12 @@ class _RecordingApiClient extends ApiClient {
   _RecordingApiClient() : super(baseUrl: 'http://test.invalid');
 
   final List<String> requestedPaths = [];
+  final List<Map<String, dynamic>?> requestedQueries = [];
 
   @override
   Future<dynamic> get(String path, {Map<String, dynamic>? query}) async {
     requestedPaths.add(path);
+    requestedQueries.add(query);
     return <dynamic>[];
   }
 }
@@ -43,14 +45,19 @@ void main() {
           ),
         );
 
-        await tester.enterText(find.byType(TextField), '500066');
-        // The regression: iOS's numeric keypad has no return/search key, so
+        await tester.enterText(find.byType(TextField), 'T00002048');
+        // The regression: a keypad without a return/search key means
         // onSubmitted alone can never fire from typing. Tapping the button —
         // not pressing Enter — is what this test exercises.
         await tester.tap(find.byTooltip('Search'));
         await tester.pumpAndSettle();
 
-        expect(api.requestedPaths, ['/pieces/500066']);
+        // One label, one lookup: the Thaan's own, which also answers for the
+        // piece it becomes once shelved.
+        expect(api.requestedPaths, ['/thaans/lookup']);
+        expect(api.requestedQueries, [
+          {'code': 'T00002048'},
+        ]);
       },
     );
 
@@ -67,11 +74,14 @@ void main() {
         ),
       );
 
-      await tester.enterText(find.byType(TextField), '300032');
+      await tester.enterText(find.byType(TextField), 'T00002049');
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
 
-      expect(api.requestedPaths, ['/pieces/300032']);
+      expect(api.requestedPaths, ['/thaans/lookup']);
+      expect(api.requestedQueries, [
+        {'code': 'T00002049'},
+      ]);
     });
   });
 

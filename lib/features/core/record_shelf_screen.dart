@@ -5,26 +5,27 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/core.dart';
 import '../../widgets/ui/ui.dart';
-import 'pile_providers.dart';
+import 'pipeline_providers.dart';
+import 'records_list_screen.dart' show coreRecordsProvider;
 
-/// Piles — Phase 3. From pile to shelf: the Thaans back from Ironing become
-/// pieces, each with its own code (the QR label already on it), as stock at
-/// a location under the record's product. A retail price is the one thing
-/// the server insists on; the rest can wait.
+/// From the pipeline to the shelf: a record's Thaans back from Ironing
+/// become pieces, each with its own code (the QR label already on it), as
+/// stock at a location under the record's product. A retail price is the
+/// one thing the server insists on; the rest can wait.
 ///
-/// Repeatable — a live pile whose later Thaans come back from Ironing is
+/// Repeatable — a record whose later Thaans come back from Ironing is
 /// shelved again from the same screen, and only the new ones go.
 ///
-/// Route: `/core/piles/:id/shelf`.
-class ShelfPileScreen extends ConsumerStatefulWidget {
-  const ShelfPileScreen({super.key, required this.pileId});
-  final String pileId;
+/// Route: `/core/records/:id/shelf`.
+class RecordShelfScreen extends ConsumerStatefulWidget {
+  const RecordShelfScreen({super.key, required this.recordId});
+  final String recordId;
 
   @override
-  ConsumerState<ShelfPileScreen> createState() => _ShelfPileScreenState();
+  ConsumerState<RecordShelfScreen> createState() => _RecordShelfScreenState();
 }
 
-class _ShelfPileScreenState extends ConsumerState<ShelfPileScreen> {
+class _RecordShelfScreenState extends ConsumerState<RecordShelfScreen> {
   final _retail = TextEditingController();
   final _cost = TextEditingController();
   final _making = TextEditingController();
@@ -39,7 +40,7 @@ class _ShelfPileScreenState extends ConsumerState<ShelfPileScreen> {
   bool _busy = false;
 
   /// Set once the shelve went through — the body becomes the success state.
-  ({int count, String productCode, String? colourwayId})? _done;
+  ({int count, String productCode})? _done;
 
   /// Digits and at most one dot — a rupee amount, nothing else.
   static final _money = [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))];
@@ -54,9 +55,9 @@ class _ShelfPileScreenState extends ConsumerState<ShelfPileScreen> {
     super.dispose();
   }
 
-  void _seed(CoreShelfDraft d) {
-    if (_seededFor == d.pileId) return;
-    _seededFor = d.pileId;
+  void _seed(CoreRecordShelf d) {
+    if (_seededFor == d.colourwayId) return;
+    _seededFor = d.colourwayId;
     _retail.text = d.prices.retail;
     _cost.text = d.prices.cost;
     _making.text = d.prices.making;
@@ -67,13 +68,13 @@ class _ShelfPileScreenState extends ConsumerState<ShelfPileScreen> {
     _locationId = d.locations.isEmpty ? null : d.locations.first.id;
   }
 
-  Future<void> _shelve(CoreShelfDraft d) async {
+  Future<void> _shelve(CoreRecordShelf d) async {
     final locationId = _locationId;
     if (locationId == null) return;
     setState(() => _busy = true);
     try {
-      final result = await ref.read(pileRepositoryProvider).shelve(
-            widget.pileId,
+      final result = await ref.read(pipelineRepositoryProvider).shelve(
+            widget.recordId,
             prices: CoreShelfPrices(
               cost: _cost.text.trim(),
               making: _making.text.trim(),
@@ -84,14 +85,14 @@ class _ShelfPileScreenState extends ConsumerState<ShelfPileScreen> {
             locationId: locationId,
           );
       if (!mounted) return;
-      ref.invalidate(pilesProvider);
-      ref.invalidate(pileDetailProvider(widget.pileId));
-      ref.invalidate(pileShelfProvider(widget.pileId));
+      ref.invalidate(pipelineRecordsProvider);
+      ref.invalidate(recordThaansProvider(widget.recordId));
+      ref.invalidate(recordShelfProvider(widget.recordId));
+      ref.invalidate(coreRecordsProvider);
       setState(() {
         _done = (
           count: result.pieceCodes.isEmpty ? d.finished.length : result.pieceCodes.length,
           productCode: result.productCode,
-          colourwayId: d.colourwayId,
         );
       });
     } catch (e) {
@@ -103,7 +104,7 @@ class _ShelfPileScreenState extends ConsumerState<ShelfPileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final draft = ref.watch(pileShelfProvider(widget.pileId));
+    final draft = ref.watch(recordShelfProvider(widget.recordId));
     final d = draft.value;
     if (d != null) _seed(d);
 
@@ -113,8 +114,8 @@ class _ShelfPileScreenState extends ConsumerState<ShelfPileScreen> {
     final canGo = d != null && d.blockers.isEmpty && d.finished.isNotEmpty && _locationId != null;
 
     return AppPage(
-      title: d?.pileName ?? 'Put on shelf',
-      subtitle: d == null ? null : [d.pileCode, ?d.designCode].join(' · '),
+      title: d?.recordName ?? 'Put on shelf',
+      subtitle: d?.designCode,
       actions: const [ThemeButton()],
       padded: false,
       bottomBar: !canGo
@@ -130,16 +131,16 @@ class _ShelfPileScreenState extends ConsumerState<ShelfPileScreen> {
                 ),
               ),
             ),
-      body: AsyncView<CoreShelfDraft>(
+      body: AsyncView<CoreRecordShelf>(
         value: draft,
-        onRetry: () => ref.invalidate(pileShelfProvider(widget.pileId)),
-        loading: const LoadingState(message: 'Reading the pile…'),
+        onRetry: () => ref.invalidate(recordShelfProvider(widget.recordId)),
+        loading: const LoadingState(message: 'Reading the record…'),
         data: (d) => _buildBody(context, d),
       ),
     );
   }
 
-  Widget _buildBody(BuildContext context, CoreShelfDraft d) {
+  Widget _buildBody(BuildContext context, CoreRecordShelf d) {
     final n = d.finished.length;
     return ListView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -165,6 +166,14 @@ class _ShelfPileScreenState extends ConsumerState<ShelfPileScreen> {
             ],
           ),
         ),
+        if (d.needs.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          InlineNotice(
+            'The record still needs ${d.needs.join(', ')} — fill those in before or after, but the listing will say less until you do.',
+            icon: Icons.pending_outlined,
+            warning: true,
+          ),
+        ],
         SectionHeader('Going on the shelf', trailing: Text('$n')),
         if (d.finished.isEmpty)
           const EmptyState(compact: true, title: 'Nothing back from Ironing yet.', icon: Icons.iron_outlined)
@@ -247,40 +256,26 @@ class _ShelfPileScreenState extends ConsumerState<ShelfPileScreen> {
         textInputAction: TextInputAction.next,
       );
 
-  Widget _buildDone(BuildContext context, CoreShelfDraft? d, ({int count, String productCode, String? colourwayId}) done) {
+  Widget _buildDone(BuildContext context, CoreRecordShelf? d, ({int count, String productCode}) done) {
     final n = done.count;
-    final colourwayId = done.colourwayId;
     final code = done.productCode;
     return AppPage(
-      title: d?.pileName ?? 'On the shelf',
-      subtitle: d == null ? null : [d.pileCode, ?d.designCode].join(' · '),
+      title: d?.recordName ?? 'On the shelf',
+      subtitle: d?.designCode,
       actions: const [ThemeButton()],
       body: SuccessState(
         title: '$n Thaan${n == 1 ? '' : 's'} on the shelf',
         message: code.isEmpty
             ? 'Photograph it next so it can be listed.'
             : 'Product $code. Photograph it next so it can be listed.',
-        actionLabel: colourwayId == null ? null : 'Photograph it',
-        onAction: colourwayId == null
-            ? null
-            : () => context.push(
-                  '/core/records/$colourwayId/photos'
-                  '${code.isEmpty ? '' : '?code=${Uri.encodeComponent(code)}'}',
-                ),
-        secondaryLabel: 'Back to piles',
-        onSecondary: () => _backToPiles(context),
+        actionLabel: 'Photograph it',
+        onAction: () => context.push(
+          '/core/records/${widget.recordId}/photos'
+          '${code.isEmpty ? '' : '?code=${Uri.encodeComponent(code)}'}',
+        ),
+        secondaryLabel: 'Back to records',
+        onSecondary: () => context.pop(),
       ),
     );
-  }
-
-  /// Pop until the piles list — the detail underneath is stale now and
-  /// there is nothing left to do on it.
-  void _backToPiles(BuildContext context) {
-    final router = GoRouter.of(context);
-    while (router.canPop()) {
-      final atList = router.routerDelegate.currentConfiguration.uri.path == '/core/piles';
-      if (atList) break;
-      router.pop();
-    }
   }
 }

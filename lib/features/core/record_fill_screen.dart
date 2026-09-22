@@ -4,29 +4,30 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/core.dart';
 import '../../widgets/ui/ui.dart';
-import '../core/core_auth.dart' show coreOptionsProvider;
-import 'pile_providers.dart';
+import 'core_auth.dart' show coreOptionsProvider;
+import 'pipeline_providers.dart';
+import 'records_list_screen.dart' show coreRecordsProvider;
 
-/// Piles — Phase 2. Fill in what a pile is: the motif, the craft, the
-/// border, its colours — the details decided at this stage that the bale's
-/// cloth item couldn't know. The first save makes the Product Management
-/// record (the colourway); every save after that patches it.
+/// Fill in what a record is: the motif, the craft, the border, its colours —
+/// the details decided on the floor that the bale's cloth item couldn't
+/// know. The record already exists (made at the door when its Thaans came
+/// back from Print); every save here patches it.
 ///
 /// Nothing is typed. What the item already settled (type, fibre, size) is
 /// shown, not asked; what's to be decided is a picker each, from the same
 /// Master Lists the web's record form uses; and the price, photos and
 /// stock wait for Ironing, where they belong.
 ///
-/// Route: `/core/piles/:id/complete`.
-class CompletePileScreen extends ConsumerStatefulWidget {
-  const CompletePileScreen({super.key, required this.pileId});
-  final String pileId;
+/// Route: `/core/records/:id/fill`.
+class RecordFillScreen extends ConsumerStatefulWidget {
+  const RecordFillScreen({super.key, required this.recordId});
+  final String recordId;
 
   @override
-  ConsumerState<CompletePileScreen> createState() => _CompletePileScreenState();
+  ConsumerState<RecordFillScreen> createState() => _RecordFillScreenState();
 }
 
-class _CompletePileScreenState extends ConsumerState<CompletePileScreen> {
+class _RecordFillScreenState extends ConsumerState<RecordFillScreen> {
   /// Every field's current pick, by key — seeded once from the draft, then
   /// the person's. Null is "not yet", and is sent as null.
   final _attrs = <String, String?>{};
@@ -38,9 +39,9 @@ class _CompletePileScreenState extends ConsumerState<CompletePileScreen> {
   String? _seededFor;
   bool _busy = false;
 
-  void _seed(CorePileDraft d) {
-    if (_seededFor == d.pileId) return;
-    _seededFor = d.pileId;
+  void _seed(CoreRecordFill d) {
+    if (_seededFor == d.colourwayId) return;
+    _seededFor = d.colourwayId;
     _attrs
       ..clear()
       ..addEntries([for (final f in d.fields) MapEntry(f.key, f.valueId)]);
@@ -48,20 +49,20 @@ class _CompletePileScreenState extends ConsumerState<CompletePileScreen> {
     _secondaryColourId = d.secondaryColourId;
   }
 
-  /// The next draft pile still waiting on something — the one "Save · next
-  /// pile" would open. Null when this is the last.
-  CorePile? _nextOf(List<CorePile>? drafts) {
-    for (final p in drafts ?? const <CorePile>[]) {
-      if (p.id != widget.pileId && p.needs.isNotEmpty) return p;
+  /// The next record in the pipeline still waiting on something — the one
+  /// "Save · next" would open. Null when this is the last.
+  CorePipelineRecord? _nextOf(List<CorePipelineRecord>? rows) {
+    for (final r in rows ?? const <CorePipelineRecord>[]) {
+      if (r.id != widget.recordId && r.needs.isNotEmpty) return r;
     }
     return null;
   }
 
-  Future<void> _save(CorePileDraft draft) async {
+  Future<void> _save(CoreRecordFill draft) async {
     setState(() => _busy = true);
     try {
-      final result = await ref.read(pileRepositoryProvider).complete(
-            widget.pileId,
+      final result = await ref.read(pipelineRepositoryProvider).fill(
+            widget.recordId,
             attributes: {for (final f in draft.fields) f.key: _attrs[f.key]},
             colourId: _colourId,
             secondaryColourId: _secondaryColourId,
@@ -69,20 +70,20 @@ class _CompletePileScreenState extends ConsumerState<CompletePileScreen> {
       if (!mounted) return;
       showOk(context, result.message);
 
-      ref.invalidate(pileDetailProvider(widget.pileId));
-      ref.invalidate(pileDraftProvider(widget.pileId));
-      ref.invalidate(pilesProvider);
+      ref.invalidate(recordFillProvider(widget.recordId));
+      ref.invalidate(pipelineRecordsProvider);
+      ref.invalidate(coreRecordsProvider);
 
-      // Freshly fetched, so the pile just saved no longer counts if it is
+      // Freshly fetched, so the record just saved no longer counts if it is
       // now complete — and the next one offered really does need something.
-      List<CorePile>? drafts;
+      List<CorePipelineRecord>? rows;
       try {
-        drafts = await ref.read(pilesProvider('draft').future);
+        rows = await ref.read(pipelineRecordsProvider('in_pipeline').future);
       } catch (_) {
-        drafts = null;
+        rows = null;
       }
       if (!mounted) return;
-      final next = _nextOf(drafts);
+      final next = _nextOf(rows);
       if (next == null) {
         context.pop();
         return;
@@ -90,17 +91,13 @@ class _CompletePileScreenState extends ConsumerState<CompletePileScreen> {
       final open = await showConfirmDialog(
         context,
         title: 'Next: ${next.name}?',
-        message: [
-          next.code,
-          '${next.thaanCount} Thaan${next.thaanCount == 1 ? '' : 's'}',
-          'needs ${next.needs.join(', ')}',
-        ].join(' · '),
+        message: [next.summary, 'needs ${next.needs.join(', ')}'].join(' · '),
         confirmLabel: 'Open',
         cancelLabel: 'Done',
       );
       if (!mounted) return;
       if (open) {
-        context.pushReplacement('/core/piles/${next.id}/complete');
+        context.pushReplacement('/core/records/${next.id}/fill');
       } else {
         context.pop();
       }
@@ -113,27 +110,25 @@ class _CompletePileScreenState extends ConsumerState<CompletePileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final draft = ref.watch(pileDraftProvider(widget.pileId));
+    final draft = ref.watch(recordFillProvider(widget.recordId));
     final options = ref.watch(coreOptionsProvider);
-    final pile = ref.watch(pileDetailProvider(widget.pileId));
-    final drafts = ref.watch(pilesProvider('draft'));
+    final rows = ref.watch(pipelineRecordsProvider('in_pipeline'));
 
     final d = draft.value;
     if (d != null) _seed(d);
 
-    final thaanCount = pile.value?.thaanCount;
     final subtitle = d == null
         ? null
         : [
-            d.pileCode,
-            if (thaanCount != null) '$thaanCount Thaan${thaanCount == 1 ? '' : 's'}',
+            if (d.designCode != null) d.designCode!,
+            if (d.thaanCount > 0) '${d.thaanCount} Thaan${d.thaanCount == 1 ? '' : 's'}',
             if (d.stage.isNotEmpty) 'at ${d.stage}',
           ].join(' · ');
 
-    final hasNext = _nextOf(drafts.value) != null;
+    final hasNext = _nextOf(rows.value) != null;
 
     return AppPage(
-      title: d?.pileName ?? 'Complete pile',
+      title: d?.recordName ?? 'Fill in details',
       subtitle: subtitle,
       actions: const [ThemeButton()],
       padded: false,
@@ -141,28 +136,27 @@ class _CompletePileScreenState extends ConsumerState<CompletePileScreen> {
           ? null
           : BottomActionBar(
               primary: AppButton.primary(
-                label: hasNext ? 'Save · next pile' : 'Save',
+                label: hasNext ? 'Save · next' : 'Save',
                 icon: Icons.check,
                 busy: _busy,
                 onPressed: () => _save(d),
               ),
             ),
-      body: AsyncView<CorePileDraft>(
+      body: AsyncView<CoreRecordFill>(
         value: draft,
-        onRetry: () => ref.invalidate(pileDraftProvider(widget.pileId)),
-        loading: const LoadingState(message: 'Reading the pile…'),
+        onRetry: () => ref.invalidate(recordFillProvider(widget.recordId)),
+        loading: const LoadingState(message: 'Reading the record…'),
         data: (d) => AsyncView<CoreOptions>(
           value: options,
           onRetry: () => ref.invalidate(coreOptionsProvider),
           loading: const LoadingState(message: 'Loading the lists…'),
-          data: (o) => _buildForm(context, d, o, pile.value),
+          data: (o) => _buildForm(context, d, o),
         ),
       ),
     );
   }
 
-  Widget _buildForm(BuildContext context, CorePileDraft d, CoreOptions o, CorePile? pile) {
-    final photoUrl = pile?.photoUrl;
+  Widget _buildForm(BuildContext context, CoreRecordFill d, CoreOptions o) {
     final sareeSize = d.sareeSize;
     final colours = _pickOptions(o['colour']);
 
@@ -170,19 +164,7 @@ class _CompletePileScreenState extends ConsumerState<CompletePileScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         // ── Known already ──
-        Row(
-          children: [
-            RowThumb(
-              size: 64,
-              image: photoUrl == null ? null : NetworkImage(photoUrl),
-              icon: photoUrl == null ? Icons.layers_outlined : null,
-            ),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: InlineNotice("Already known from the bale's cloth item — nothing to type here."),
-            ),
-          ],
-        ),
+        const InlineNotice("Already known from the bale's cloth item — nothing to type here."),
         const SizedBox(height: 12),
         AppCard(
           child: Column(
@@ -201,6 +183,10 @@ class _CompletePileScreenState extends ConsumerState<CompletePileScreen> {
 
         // ── Decided here ──
         SectionHeader(d.stage.isEmpty ? 'Fill in' : 'Decided at ${d.stage} — fill in'),
+        if (d.needs.isNotEmpty) ...[
+          InlineNotice('Still needs ${d.needs.join(', ')}.', icon: Icons.pending_outlined, warning: true),
+          const SizedBox(height: 12),
+        ],
         if (d.fields.isEmpty)
           const EmptyState(compact: true, title: 'Nothing to decide at this stage.', icon: Icons.check_circle_outline)
         else

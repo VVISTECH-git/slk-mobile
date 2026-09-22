@@ -18,10 +18,6 @@ import 'features/bales/record_cutting_screen.dart';
 import 'features/handovers/handovers_screen.dart';
 import 'features/thaans/print_labels_screen.dart';
 import 'features/thaans/scan_thaan_screen.dart';
-import 'features/piles/complete_pile_screen.dart';
-import 'features/piles/piles_screen.dart';
-import 'features/piles/pile_detail_screen.dart';
-import 'features/piles/shelf_pile_screen.dart';
 import 'features/stage_summary/stage_summary_screen.dart';
 import 'features/vendors/vendor_detail_screen.dart';
 import 'features/vendors/vendor_ledger_screen.dart';
@@ -33,7 +29,9 @@ import 'features/core/photographs_screen.dart';
 import 'features/core/picking_screen.dart';
 import 'features/core/records_list_screen.dart';
 import 'features/core/record_detail_screen.dart';
+import 'features/core/record_fill_screen.dart';
 import 'features/core/record_photos_screen.dart';
+import 'features/core/record_shelf_screen.dart';
 import 'features/core/stock_records_screen.dart';
 import 'features/stock/stock_screen.dart';
 import 'features/stock/movements_screen.dart';
@@ -171,6 +169,19 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
 
+      // The production side of a record that came through the pipeline.
+      // Fill in the details decided on the floor (motif, craft, colours)…
+      GoRoute(
+        path: '/core/records/:id/fill',
+        builder: (_, state) => RecordFillScreen(recordId: state.pathParameters['id']!),
+      ),
+      // …and put the Thaans back from Ironing on the shelf: price,
+      // location, and each becomes a piece under the record's product.
+      GoRoute(
+        path: '/core/records/:id/shelf',
+        builder: (_, state) => RecordShelfScreen(recordId: state.pathParameters['id']!),
+      ),
+
       // A saree in one hand, a phone in the other. Not a tab on the catalogue:
       // a different question, asked in a different posture.
       GoRoute(path: '/core/stock', builder: (_, _) => const StockRecordsScreen()),
@@ -222,26 +233,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Production Manager / Operations Manager: how many Thaans currently
       // sit at each point in the pipeline, and which ones.
       GoRoute(path: '/core/thaans/stage-summary', builder: (_, _) => const StageSummaryScreen()),
-
-      // Piles — what came back from Print, sorted by design. Made at the
-      // door in Handovers → Receive; browsed here. Static before dynamic.
-      GoRoute(path: '/core/piles', builder: (_, _) => const PilesScreen()),
-      GoRoute(
-        path: '/core/piles/:id',
-        builder: (_, state) => PileDetailScreen(pileId: state.pathParameters['id']!),
-      ),
-      // Phase 2 — fill in a pile's details (motif, craft, colours), which
-      // makes or patches its Product Management record.
-      GoRoute(
-        path: '/core/piles/:id/complete',
-        builder: (_, state) => CompletePileScreen(pileId: state.pathParameters['id']!),
-      ),
-      // Phase 3 — put the Thaans back from Ironing on the shelf: price,
-      // location, and each becomes a piece under the record's product.
-      GoRoute(
-        path: '/core/piles/:id/shelf',
-        builder: (_, state) => ShelfPileScreen(pileId: state.pathParameters['id']!),
-      ),
 
       // POS + invoices — live.
       GoRoute(path: '/pos', builder: (_, _) => const PosScreen()),

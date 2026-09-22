@@ -85,7 +85,7 @@ class AppPage extends StatelessWidget {
 }
 
 /// The action strip at the bottom of a screen: one primary button, optionally
-/// one secondary beside it, and an optional note above them ("All four piles
+/// one secondary beside it, and an optional note above them ("All four records
 /// go in as one bill."). Sits on the surface colour with a top border, and
 /// pads itself past the system navigation bar.
 class BottomActionBar extends StatelessWidget {
@@ -137,7 +137,7 @@ class BottomActionBar extends StatelessWidget {
   }
 }
 
-/// A heading between groups on a screen — "Piles", "Recent" — with an
+/// A heading between groups on a screen — "Scanned", "Recent" — with an
 /// optional trailing count or action. 12 px above, 8 below, so groups read
 /// as groups.
 class SectionHeader extends StatelessWidget {

@@ -8,22 +8,22 @@ import '../../models/core.dart';
 import '../../widgets/ui/ui.dart';
 import '../pieces/piece_labels_pdf.dart';
 import '../pos/barcode_scan_screen.dart';
-import 'core_auth.dart';
+import '../thaans/thaan_providers.dart';
 
 /// What did I just scan?
 ///
 /// The floor's question, asked with a saree in one hand and a phone in the
 /// other. Product Management answers "what do we sell and how much is there";
-/// this answers "which one is this, is it still ours, and where does the
-/// ledger think it is" — a different question, asked in a different posture,
-/// so it gets its own screen rather than a tab on the catalogue.
+/// this answers "which one is this, which record is it under, is it still
+/// ours, and where does the ledger think it is" — a different question,
+/// asked in a different posture, so it gets its own screen rather than a
+/// tab on the catalogue.
 ///
-/// Either code on the label works. The item code — 500001 and up — is one
-/// saree; the product code — 300001 and up — is the consignment it arrived
-/// in, and scanning that returns the whole delivery, which is what makes
-/// counting a box possible. Refusing a code because it named a delivery
-/// rather than a piece would be a strange thing to explain to somebody
-/// holding it.
+/// One label, either way. The QR stitched onto a Thaan at Label Stitching
+/// is the same code it keeps as a piece once it goes on the shelf, so
+/// `GET /thaans/lookup?code=` answers for both: where it is in the
+/// pipeline while it is a Thaan, and where it sits in stock once it is a
+/// piece.
 class StockRecordsScreen extends ConsumerStatefulWidget {
   const StockRecordsScreen({super.key});
 
@@ -43,7 +43,7 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
 
   /// The last code looked up, so the answer can name what it is answering.
   String? _asked;
-  List<CorePiece>? _found;
+  CoreThaan? _found;
   String? _problem;
 
   @override
@@ -70,19 +70,13 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
     });
 
     try {
-      final data = await ref.read(coreApiProvider).get('/pieces/$code');
-
-      final pieces = [
-        for (final row in (data as List))
-          CorePiece.fromJson((row as Map).cast<String, dynamic>()),
-      ];
-
-      if (mounted) setState(() => _found = pieces);
+      final thaan = await ref.read(thaanRepositoryProvider).lookupByCode(code);
+      if (mounted) setState(() => _found = thaan);
     } on ApiException catch (e) {
       /*
         The server's own words, shown as they are.
 
-        "That is not an SLK label" and "No piece carries that code" are
+        "That is not an SLK label" and "No Thaan carries that code" are
         different answers to a scan and the difference matters — the first is
         a QR from somewhere else, the second is one of ours that nobody has
         entered. Restating them here would mean two places to keep honest.
@@ -100,7 +94,7 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
         // Ready for the next scan without anybody tapping the field again:
         // a Bluetooth scanner types into whichever field has focus, so focus
         // stays here. The on-screen keyboard is a different matter — it
-        // covered the very pieces just looked up, on a phone whose keypad
+        // covered the very answer just looked up, on a phone whose keypad
         // can't even submit — so it is put away. A scanner never needs it.
         _focus.requestFocus();
         SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
@@ -118,13 +112,14 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
     if (code != null) await _lookup(code);
   }
 
-  /// One sheet, whether the scan resolved a single saree or a whole
-  /// consignment — a box of ten arriving is exactly when a dozen labels are
-  /// wanted at once, not one screen visit per piece.
-  Future<void> _printLabels(List<CorePiece> pieces) => printPieceLabels(
-        codes: [for (final p in pieces) p.itemCode],
-        productName: pieces.first.name,
-        variantLabel: pieces.first.colour,
+  /// A fresh label for a piece whose own got torn or faded — the same code,
+  /// reprinted. Only once it is a piece: a Thaan's label is printed from
+  /// its bale, in a sheet, and reprinting one on its own is not a thing
+  /// the floor does.
+  Future<void> _printLabel(CoreThaan t) => printPieceLabels(
+        codes: [t.pieceCode!],
+        productName: t.recordName ?? t.itemName,
+        variantLabel: t.recordColour,
       );
 
   @override
@@ -155,12 +150,12 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
               children: [
                 Expanded(
                   child: AppTextField(
-                    label: 'Item or product code',
-                    hint: '500066 or 300032',
+                    label: 'Thaan or piece code',
+                    hint: 'T00002048',
                     controller: _field,
                     focusNode: _focus,
                     autofocus: true,
-                    keyboardType: TextInputType.number,
+                    textCapitalization: TextCapitalization.characters,
                     textInputAction: TextInputAction.search,
                     // Guarded like the arrow: a scanner's Enter arriving while
                     // a lookup is in flight would start a second one and show
@@ -168,10 +163,6 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
                     onSubmitted: (v) {
                       if (!_busy) _lookup(v);
                     },
-                    // iOS's numeric keypad has no return/search key, so typing
-                    // a code by hand has no way to submit without this — the
-                    // Bluetooth scanner's Enter keystroke reaches onSubmitted
-                    // regardless of what the on-screen keyboard shows.
                     suffix: AppIconButton(
                       icon: Icons.arrow_forward,
                       tooltip: 'Search',
@@ -190,7 +181,7 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Scan the label on a saree, or the one on the box it arrived in.',
+              'Scan the label on a saree — the same one it has carried since Label Stitching.',
               style: TextStyle(fontSize: 12, color: p.textMuted),
             ),
             const SizedBox(height: 20),
@@ -203,18 +194,18 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
             else if (_problem != null)
               _Problem(code: _asked ?? '', message: _problem!)
             else if (_found != null) ...[
-              _Summary(code: _asked ?? '', pieces: _found!),
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerRight,
-                child: AppButton.ghost(
-                  label: _found!.length > 1 ? 'Print labels' : 'Print label',
-                  icon: Icons.qr_code_2,
-                  onPressed: () => _printLabels(_found!),
+              if (_found!.pieceCode != null) ...[
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: AppButton.ghost(
+                    label: 'Print label',
+                    icon: Icons.qr_code_2,
+                    onPressed: () => _printLabel(_found!),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 2),
-              for (final piece in _found!) _PieceCard(piece: piece),
+                const SizedBox(height: 2),
+              ],
+              _ThaanCard(thaan: _found!),
             ] else
               const _Idle(),
           ],
@@ -258,166 +249,123 @@ class _Problem extends StatelessWidget {
   }
 }
 
-class _Summary extends StatelessWidget {
-  const _Summary({required this.code, required this.pieces});
+/// One Thaan, answered: which record it is under, where it is in the
+/// pipeline, and — once it is a piece — whether it is still ours and where.
+class _ThaanCard extends StatelessWidget {
+  const _ThaanCard({required this.thaan});
 
-  final String code;
-  final List<CorePiece> pieces;
+  final CoreThaan thaan;
 
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-
-    final held = pieces.where((piece) => piece.isHeld).length;
-    final consignment = pieces.length > 1;
+    final t = thaan;
+    final code = t.pieceCode ?? t.code ?? '—';
 
     return AppCard(
-      emphasis: true,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            consignment ? Icons.inventory_2_outlined : Icons.label_outline,
-            size: 20,
-            color: p.primary,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // The same QR the label carries — the bare code, which is what
+              // a scan of either resolves. On screen so a piece can be
+              // identified or handed on without a label printed, and another
+              // phone can scan it straight off this one. White behind it with
+              // room around: a QR needs its quiet zone to be read, whatever
+              // the theme, and the card is not white.
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: p.border),
+                ),
+                child: QrImageView(
+                  data: code,
+                  size: 64,
+                  padding: EdgeInsets.zero,
+                  backgroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      code,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                        color: p.text,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      t.recordLabel ?? t.itemName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: p.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              /*
+                Where it stands, said first and said loudly.
+
+                It is the first thing a scan should answer. The ledger
+                decides it for a piece — sold, written off or sent on all
+                make it "Gone" — and a saree that reads "Warehouse" when it
+                left six weeks ago is the bug this screen exists to not have.
+              */
+              _stockBadge(t),
+            ],
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  code,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: p.primary,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  // A consignment is counted; a single piece is not, because
-                  // "1 of 1 still held" is a strange way to say "yes".
-                  consignment
-                      ? '${pieces.length} pieces · $held still held'
-                      : 'One piece',
-                  style: TextStyle(fontSize: 12.5, color: p.textSecondary),
-                ),
-              ],
+          const SizedBox(height: 12),
+          KeyValueRow('Record', t.recordLabel ?? 'Not in a record'),
+          KeyValueRow('Pipeline', t.pipelineStatus),
+          KeyValueRow('Stock', t.stockStatus ?? (t.pieceCode == null ? 'In pipeline' : 'On shelf')),
+          if (t.pieceCode != null) KeyValueRow('Piece', t.pieceCode!, mono: true),
+          if (t.productCode != null) KeyValueRow('Product', t.productCode!, mono: true),
+          KeyValueRow(
+            'Where',
+            // Null once it has left us, which is not the same as unknown;
+            // and not a place at all while it is still a Thaan.
+            t.locationName ?? (t.isHeld == false ? 'No longer with us' : 'Not on a shelf yet'),
+            strong: t.isHeld == true,
+          ),
+          if (t.isHeld != null) KeyValueRow('Held', t.isHeld! ? 'Yes' : 'No'),
+          if (t.priceMinor != null) KeyValueRow('Price', t.price),
+          const Divider(height: 20),
+          KeyValueRow('Bale', t.baleCode, mono: true),
+          KeyValueRow('Item', '${t.itemName} · ${t.baleType}'),
+          KeyValueRow('Supplier', t.supplierName),
+          if (t.lastStage != null)
+            KeyValueRow(
+              'Last stage',
+              t.lastVendorName == null ? t.lastStage! : '${t.lastStage} · ${t.lastVendorName}',
             ),
-          ),
+          if (t.voidedAt != null) ...[
+            const SizedBox(height: 10),
+            InlineNotice('Voided on ${t.voidedAt}', icon: Icons.block, warning: true),
+          ],
         ],
       ),
     );
   }
-}
 
-class _PieceCard extends StatelessWidget {
-  const _PieceCard({required this.piece});
-
-  final CorePiece piece;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.p;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // The same QR the printed label carries — the bare item code,
-                // which is what a scan of either resolves. On screen so a
-                // piece can be identified or handed on without a label
-                // printed, and another phone can scan it straight off this
-                // one. White behind it with room around: a QR needs its quiet
-                // zone to be read, whatever the theme, and the card is not
-                // white.
-                Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: p.border),
-                  ),
-                  child: QrImageView(
-                    data: piece.itemCode,
-                    size: 64,
-                    padding: EdgeInsets.zero,
-                    backgroundColor: Colors.white,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        piece.itemCode,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
-                          color: p.text,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        piece.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 13, color: p.textSecondary),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                /*
-                  Held or gone, said first and said loudly.
-
-                  It is the first thing a scan should answer. The ledger decides
-                  it — sold, written off or sent on all make it false — and a
-                  saree that reads "Warehouse" when it left six weeks ago is the
-                  bug this screen exists to not have.
-                */
-                piece.isHeld
-                    ? const StatusBadge('In stock', tone: BadgeTone.success)
-                    : const StatusBadge('Gone', tone: BadgeTone.danger),
-              ],
-            ),
-            const SizedBox(height: 12),
-            KeyValueRow(
-              'Where',
-              // Null once it has left us, which is not the same as unknown.
-              piece.location ?? 'No longer with us',
-              strong: piece.isHeld,
-            ),
-            KeyValueRow('Price', piece.price),
-            if (piece.colour != null) KeyValueRow('Colour', piece.colour!),
-            if (piece.productType != null)
-              KeyValueRow('Type', piece.productType!),
-            // Consignment before design, and that ordering is the point: the
-            // product code is what the paperwork says, the design code is
-            // internal and repeats. Kept only because a scan is also how
-            // somebody finds their way back to the record.
-            if (piece.productCode != null)
-              KeyValueRow('Consignment', piece.productCode!, mono: true),
-            KeyValueRow('Design', piece.designCode, mono: true),
-            if (piece.receivedAt != null)
-              KeyValueRow(
-                'Received',
-                piece.reference == null
-                    ? piece.receivedAt!
-                    : '${piece.receivedAt!} · ${piece.reference!}',
-              ),
-          ],
-        ),
-      ),
-    );
+  static Widget _stockBadge(CoreThaan t) {
+    if (t.voidedAt != null) return const StatusBadge('Voided', tone: BadgeTone.danger);
+    return switch (t.stockStatus) {
+      'On shelf' => const StatusBadge('On shelf', tone: BadgeTone.success),
+      'Gone' => const StatusBadge('Gone', tone: BadgeTone.danger),
+      'Voided' => const StatusBadge('Voided', tone: BadgeTone.danger),
+      'In pipeline' => const StatusBadge('In pipeline', tone: BadgeTone.brand),
+      _ => StatusBadge.pipeline(t.pipelineStatus),
+    };
   }
 }

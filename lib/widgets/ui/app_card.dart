@@ -20,7 +20,7 @@ class AppCard extends StatelessWidget {
   final EdgeInsetsGeometry padding;
 
   /// A soft tint of the brand colour — for the one card on a screen that
-  /// is the thing being worked on (the pile being scanned, the Thaan found).
+  /// is the thing being worked on (the record being scanned into, the Thaan found).
   final bool emphasis;
 
   /// A fixed background instead of the surface colour (a status tone).
