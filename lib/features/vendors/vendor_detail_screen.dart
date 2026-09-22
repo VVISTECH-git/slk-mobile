@@ -426,27 +426,19 @@ class _PaySheet extends StatefulWidget {
   State<_PaySheet> createState() => _PaySheetState();
 }
 
+/// The API takes the date as YYYY-MM-DD; the field shows it the way the app does.
+String _iso(DateTime d) => d.toIso8601String().substring(0, 10);
+
 class _PaySheetState extends State<_PaySheet> {
-  late final _paidOn = TextEditingController(text: DateTime.now().toIso8601String().substring(0, 10));
+  DateTime _paidOn = DateTime.now();
   final _method = TextEditingController();
   final _notes = TextEditingController();
 
   @override
   void dispose() {
-    _paidOn.dispose();
     _method.dispose();
     _notes.dispose();
     super.dispose();
-  }
-
-  Future<void> _pickDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.tryParse(_paidOn.text) ?? DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 1)),
-    );
-    if (picked != null) setState(() => _paidOn.text = picked.toIso8601String().substring(0, 10));
   }
 
   @override
@@ -455,12 +447,12 @@ class _PaySheetState extends State<_PaySheet> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        AppTextField(
+        AppDateField(
           label: 'Date',
-          controller: _paidOn,
-          readOnly: true,
-          onTap: _pickDate,
-          suffix: const Icon(Icons.calendar_today_outlined),
+          value: _paidOn,
+          firstDate: DateTime(2020),
+          lastDate: DateTime.now().add(const Duration(days: 1)),
+          onChanged: (d) => setState(() => _paidOn = d),
         ),
         const SizedBox(height: 12),
         AppTextField(label: 'Method', controller: _method, hint: 'Cash, bank transfer — optional'),
@@ -471,7 +463,7 @@ class _PaySheetState extends State<_PaySheet> {
           label: 'Pay ₹${widget.total.toStringAsFixed(0)}',
           onPressed: () => Navigator.pop(
             context,
-            _PayDraft(paidOn: _paidOn.text, method: _method.text.trim(), notes: _notes.text.trim()),
+            _PayDraft(paidOn: _iso(_paidOn), method: _method.text.trim(), notes: _notes.text.trim()),
           ),
         ),
       ],
@@ -496,27 +488,16 @@ class _RecordPaymentSheet extends StatefulWidget {
 
 class _RecordPaymentSheetState extends State<_RecordPaymentSheet> {
   final _amount = TextEditingController();
-  late final _paidOn = TextEditingController(text: DateTime.now().toIso8601String().substring(0, 10));
+  DateTime _paidOn = DateTime.now();
   final _method = TextEditingController();
   final _notes = TextEditingController();
 
   @override
   void dispose() {
     _amount.dispose();
-    _paidOn.dispose();
     _method.dispose();
     _notes.dispose();
     super.dispose();
-  }
-
-  Future<void> _pickDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.tryParse(_paidOn.text) ?? DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 1)),
-    );
-    if (picked != null) setState(() => _paidOn.text = picked.toIso8601String().substring(0, 10));
   }
 
   @override
@@ -533,12 +514,12 @@ class _RecordPaymentSheetState extends State<_RecordPaymentSheet> {
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 12),
-        AppTextField(
+        AppDateField(
           label: 'Date',
-          controller: _paidOn,
-          readOnly: true,
-          onTap: _pickDate,
-          suffix: const Icon(Icons.calendar_today_outlined),
+          value: _paidOn,
+          firstDate: DateTime(2020),
+          lastDate: DateTime.now().add(const Duration(days: 1)),
+          onChanged: (d) => setState(() => _paidOn = d),
         ),
         const SizedBox(height: 12),
         AppTextField(label: 'Method', controller: _method, hint: 'Cash, bank transfer — optional'),
@@ -553,7 +534,7 @@ class _RecordPaymentSheetState extends State<_RecordPaymentSheet> {
                     context,
                     _RecordPaymentDraft(
                       amount: _amount.text.trim(),
-                      paidOn: _paidOn.text,
+                      paidOn: _iso(_paidOn),
                       method: _method.text.trim(),
                       notes: _notes.text.trim(),
                     ),

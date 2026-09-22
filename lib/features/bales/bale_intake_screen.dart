@@ -237,9 +237,9 @@ class _BaleIntakeScreenState extends ConsumerState<BaleIntakeScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: AppTextField(
-                  label: 'Code',
+                  label: 'Grade code',
                   controller: _gradeCode,
-                  helper: 'identifier',
+                  hint: 'optional',
                 ),
               ),
             ],
