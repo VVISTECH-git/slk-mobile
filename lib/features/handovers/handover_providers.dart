@@ -71,6 +71,34 @@ final coreVendorsProvider = FutureProvider.autoDispose<List<CoreVendor>>((ref) a
   ];
 });
 
+/// One pile inside a receive — either a pile that already exists
+/// ([pileId]) or one to make right now ([newPile]), and which of the
+/// batch's Thaans go in it. Thaans in the receive that no spec names are
+/// received just as Thaans.
+class ReceivePileSpec {
+  const ReceivePileSpec({
+    this.pileId,
+    this.newPile,
+    required this.thaanIds,
+  }) : assert(pileId != null || newPile != null, 'a pile is either existing or new');
+
+  final String? pileId;
+  final ({String name, String mainColourId, String photoKey})? newPile;
+  final List<String> thaanIds;
+
+  Map<String, dynamic> toJson() => {
+        'pileId': pileId,
+        'newPile': newPile == null
+            ? null
+            : {
+                'name': newPile!.name,
+                'mainColourId': newPile!.mainColourId,
+                'photoKey': newPile!.photoKey,
+              },
+        'thaanIds': thaanIds,
+      };
+}
+
 final handoverRepositoryProvider = Provider((ref) => HandoverRepository(ref));
 
 class HandoverRepository {
@@ -123,8 +151,14 @@ class HandoverRepository {
 
   /// Marks a scanned batch received, and bills whatever came back from a
   /// vendor at their rate for that stage. Returns the confirmation message.
-  Future<String> receiveBatch(List<String> thaanIds) async {
-    final data = await ref.read(coreApiProvider).post('/handovers/receive', body: {'thaanIds': thaanIds});
+  ///
+  /// [piles], when given, sorts some of [thaanIds] into piles as they come
+  /// in — one delivery, one bill, whatever the piles. Left off, the request
+  /// is exactly what it always was.
+  Future<String> receiveBatch(List<String> thaanIds, {List<ReceivePileSpec>? piles}) async {
+    final body = <String, dynamic>{'thaanIds': thaanIds};
+    if (piles != null && piles.isNotEmpty) body['piles'] = [for (final p in piles) p.toJson()];
+    final data = await ref.read(coreApiProvider).post('/handovers/receive', body: body);
     return (data as Map)['message'] as String;
   }
 }

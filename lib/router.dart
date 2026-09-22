@@ -18,6 +18,8 @@ import 'features/bales/record_cutting_screen.dart';
 import 'features/handovers/handovers_screen.dart';
 import 'features/thaans/print_labels_screen.dart';
 import 'features/thaans/scan_thaan_screen.dart';
+import 'features/piles/piles_screen.dart';
+import 'features/piles/pile_detail_screen.dart';
 import 'features/stage_summary/stage_summary_screen.dart';
 import 'features/vendors/vendor_detail_screen.dart';
 import 'features/vendors/vendor_ledger_screen.dart';
@@ -218,6 +220,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Production Manager / Operations Manager: how many Thaans currently
       // sit at each point in the pipeline, and which ones.
       GoRoute(path: '/core/thaans/stage-summary', builder: (_, _) => const StageSummaryScreen()),
+
+      // Piles — what came back from Print, sorted by design. Made at the
+      // door in Handovers → Receive; browsed here. Static before dynamic.
+      GoRoute(path: '/core/piles', builder: (_, _) => const PilesScreen()),
+      GoRoute(
+        path: '/core/piles/:id',
+        builder: (_, state) => PileDetailScreen(pileId: state.pathParameters['id']!),
+      ),
 
       // POS + invoices — live.
       GoRoute(path: '/pos', builder: (_, _) => const PosScreen()),

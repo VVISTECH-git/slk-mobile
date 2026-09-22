@@ -47,8 +47,12 @@ class SkeletonList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // shrinkWrap: a skeleton list sits inside whatever is loading — a
+    // Column in a bottom sheet as often as a full page — and must size to
+    // its rows rather than demand a height nobody can give it.
     return ListView.separated(
       padding: const EdgeInsets.all(16),
+      shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       itemCount: rows,
       separatorBuilder: (_, _) => const SizedBox(height: 12),

@@ -36,6 +36,9 @@ int? _intOf(Object? value) {
   return null;
 }
 
+/// A string, or null — never a stringified "null".
+String? _stringOf(Object? value) => value == null ? null : '$value';
+
 /// "₹2,850" — grouped the Indian way, which is what a price looks like here.
 String _rupees(int? minor) {
   if (minor == null) return '—';
@@ -986,7 +989,15 @@ class CoreThaan {
     required this.lastVendorId,
     required this.lastVendorName,
     required this.lastStage,
+    this.id,
+    this.pileId,
+    this.pileCode,
+    this.pileName,
   });
+
+  /// The row id — what `/piles/:id/thaans` wants. Nullable because the
+  /// lookup predates piles and an older server may not send it.
+  final String? id;
 
   final String? code;
   final String baleCode;
@@ -1049,7 +1060,17 @@ class CoreThaan {
   final String? lastVendorName;
   final String? lastStage;
 
+  /// The pile this Thaan sits in, if any — see [CorePile]. All null when it
+  /// isn't in one (or the server predates piles).
+  final String? pileId;
+  final String? pileCode;
+  final String? pileName;
+
   factory CoreThaan.fromJson(Map<String, dynamic> json) => CoreThaan(
+        id: _stringOf(json['id']),
+        pileId: _stringOf(json['pileId']),
+        pileCode: _stringOf(json['pileCode']),
+        pileName: _stringOf(json['pileName']),
         code: json['code'] as String?,
         baleCode: json['baleCode'] as String,
         supplierName: json['supplierName'] as String,
@@ -1378,6 +1399,10 @@ class CoreThaanForReceive {
     this.throughStage,
     this.vendorId,
     required this.vendorName,
+    this.pileId,
+    this.pileCode,
+    this.pileName,
+    this.canPile = false,
   });
 
   final String id;
@@ -1386,6 +1411,16 @@ class CoreThaanForReceive {
   final String baleType;
   final String itemName;
   final String stage;
+
+  /// The pile this Thaan is already in, if any — receiving it into another
+  /// pile moves it, and the Receive screen says so.
+  final String? pileId;
+  final String? pileCode;
+  final String? pileName;
+
+  /// Whether this receive is Print or later — the only point from which a
+  /// Thaan can go into a pile. False when the server didn't say.
+  final bool canPile;
 
   /// The last stage of a combined trip, or null for an ordinary one-stage
   /// trip. Receiving closes every stage up to it in one go.
@@ -1405,5 +1440,163 @@ class CoreThaanForReceive {
         throughStage: json['throughStage'] as String?,
         vendorId: json['vendorId'] as String?,
         vendorName: json['vendorName'] as String,
+        pileId: _stringOf(json['pileId']),
+        pileCode: _stringOf(json['pileCode']),
+        pileName: _stringOf(json['pileName']),
+        canPile: json['canPile'] == true,
+      );
+}
+
+// ── Piles ───────────────────────────────────────────────────────────────────
+
+/// One main colour a pile can be labelled with — `GET /piles/colours`.
+class CoreColour {
+  const CoreColour({required this.id, required this.label});
+
+  final String id;
+  final String label;
+
+  factory CoreColour.fromJson(Map<String, dynamic> json) => CoreColour(
+        id: '${json['id']}',
+        label: _stringOf(json['label']) ?? '${json['id']}',
+      );
+}
+
+/// The Thaans that came back from Print printed the same way — one design,
+/// one colour combination — made at the door as a delivery is received.
+/// The list row (`GET /piles`) and the detail (`GET /piles/:id`) share this
+/// shape; only the detail fills [thaans] and [events].
+class CorePile {
+  const CorePile({
+    required this.id,
+    required this.code,
+    required this.name,
+    this.photoUrl,
+    this.mainColourId,
+    this.mainColour,
+    this.createdStage,
+    required this.status,
+    required this.thaanCount,
+    this.baleCodes = const [],
+    this.createdAt,
+    this.createdByName,
+    this.thaans = const [],
+    this.events = const [],
+  });
+
+  final String id;
+  final String code;
+  final String name;
+  final String? photoUrl;
+  final String? mainColourId;
+
+  /// The colour's label, as the server names it.
+  final String? mainColour;
+
+  /// The stage whose receive this pile was made at — Print, Second Print…
+  final String? createdStage;
+
+  /// `draft`, `ready` or `live`.
+  final String status;
+  final int thaanCount;
+  final List<String> baleCodes;
+  final String? createdAt;
+  final String? createdByName;
+
+  final List<CorePileThaan> thaans;
+  final List<CorePileEvent> events;
+
+  factory CorePile.fromJson(Map<String, dynamic> json) => CorePile(
+        id: '${json['id']}',
+        code: _stringOf(json['code']) ?? '',
+        name: _stringOf(json['name']) ?? '',
+        photoUrl: _stringOf(json['photoUrl']),
+        mainColourId: _stringOf(json['mainColourId']),
+        mainColour: _stringOf(json['mainColour']),
+        createdStage: _stringOf(json['createdStage']),
+        status: _stringOf(json['status']) ?? 'draft',
+        thaanCount: _intOf(json['thaanCount']) ?? (json['thaans'] as List?)?.length ?? 0,
+        baleCodes: [for (final b in (json['baleCodes'] as List? ?? const [])) '$b'],
+        createdAt: _stringOf(json['createdAt']),
+        createdByName: _stringOf(json['createdByName']),
+        thaans: [
+          for (final t in (json['thaans'] as List? ?? const []))
+            CorePileThaan.fromJson((t as Map).cast<String, dynamic>()),
+        ],
+        events: [
+          for (final e in (json['events'] as List? ?? const []))
+            CorePileEvent.fromJson((e as Map).cast<String, dynamic>()),
+        ],
+      );
+}
+
+/// One Thaan inside a pile, as the detail lists it.
+class CorePileThaan {
+  const CorePileThaan({
+    required this.id,
+    required this.code,
+    this.baleCode,
+    this.voidedAt,
+    this.openStage,
+    this.completedStages = 0,
+  });
+
+  final String id;
+  final String code;
+  final String? baleCode;
+  final String? voidedAt;
+
+  /// The stage it's out for right now, or null when it's in hand.
+  final String? openStage;
+
+  /// How many stages it has finished — a count whether the server sent a
+  /// number or the list of stage names.
+  final int completedStages;
+
+  factory CorePileThaan.fromJson(Map<String, dynamic> json) {
+    final done = json['completedStages'];
+    return CorePileThaan(
+      id: '${json['id']}',
+      code: _stringOf(json['code']) ?? '',
+      baleCode: _stringOf(json['baleCode']),
+      voidedAt: _stringOf(json['voidedAt']),
+      openStage: _stringOf(json['openStage']),
+      completedStages: done is List ? done.length : (_intOf(done) ?? 0),
+    );
+  }
+}
+
+/// One thing that happened to a pile — made, a Thaan added, a Thaan moved
+/// in from another pile (`detail['from']` names it).
+class CorePileEvent {
+  const CorePileEvent({
+    required this.id,
+    required this.kind,
+    this.stage,
+    this.thaanCode,
+    this.detail = const {},
+    this.actorName,
+    this.at,
+  });
+
+  final String id;
+  final String kind;
+  final String? stage;
+  final String? thaanCode;
+  final Map<String, dynamic> detail;
+  final String? actorName;
+  final String? at;
+
+  /// For a "moved" event: the pile the Thaan came from.
+  String? get from => _stringOf(detail['from']);
+
+  factory CorePileEvent.fromJson(Map<String, dynamic> json) => CorePileEvent(
+        id: '${json['id']}',
+        kind: _stringOf(json['kind']) ?? '',
+        stage: _stringOf(json['stage']),
+        thaanCode: _stringOf(json['thaanCode']),
+        detail: json['detail'] is Map ? (json['detail'] as Map).cast<String, dynamic>() : const {},
+        actorName: _stringOf(json['actorName']),
+        at: _stringOf(json['at']),
       );
 }

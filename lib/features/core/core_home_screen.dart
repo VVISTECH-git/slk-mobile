@@ -192,6 +192,13 @@ const _modules = [
     ['Bale Custodian', 'Handler'],
   ),
   _Module(
+    'Piles',
+    'What came back from Print, sorted by design',
+    Icons.layers_outlined,
+    '/core/piles',
+    ['Bale Custodian', 'Handler', 'Production Manager', 'Operations Manager'],
+  ),
+  _Module(
     'Vendor Ledger',
     'Price, approve and pay vendor work',
     Icons.receipt_long_outlined,

@@ -1,8 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../models/core.dart';
 import '../../widgets/ui/ui.dart';
+import '../piles/pile_providers.dart';
 import '../production/continuous_scanner.dart';
 import 'handover_providers.dart';
 
@@ -415,9 +419,94 @@ class _ReceivePanel extends ConsumerStatefulWidget {
   ConsumerState<_ReceivePanel> createState() => _ReceivePanelState();
 }
 
+/// A pile being filled in this receive — one that already exists on the
+/// server (made at Print, now getting its Nellateeta delivery) or one made
+/// at the door just now, which the server only learns of when the batch is
+/// confirmed. Holds the Thaans scanned into it so far.
+class _SessionPile {
+  _SessionPile.existing(CorePile pile)
+      : pileId = pile.id,
+        code = pile.code,
+        name = pile.name,
+        colourId = pile.mainColourId,
+        colourLabel = pile.mainColour,
+        photoKey = null,
+        photoFile = null,
+        photoUrl = pile.photoUrl;
+
+  _SessionPile.fresh({
+    required this.name,
+    required this.colourId,
+    required this.colourLabel,
+    required this.photoKey,
+    required this.photoFile,
+  })  : pileId = null,
+        code = null,
+        photoUrl = null;
+
+  /// Null until the server makes it — i.e. for a pile made in this session.
+  final String? pileId;
+  final String? code;
+  final String name;
+  final String? colourId;
+  final String? colourLabel;
+
+  /// The uploaded photo's key, for a new pile; an existing pile already has
+  /// its photo on the server.
+  final String? photoKey;
+  final File? photoFile;
+  final String? photoUrl;
+
+  final thaans = <CoreThaanForReceive>[];
+
+  bool get isNew => pileId == null;
+
+  /// The Thaans that will actually go in this pile — the rest are received
+  /// without one, because they're not back from Print yet.
+  List<CoreThaanForReceive> get pileable => [for (final t in thaans) if (t.canPile) t];
+
+  String get label => colourLabel == null || colourLabel!.isEmpty ? name : '$name · $colourLabel';
+
+  ImageProvider? get image {
+    if (photoFile != null) return FileImage(photoFile!);
+    if (photoUrl != null) return NetworkImage(photoUrl!);
+    return null;
+  }
+}
+
 class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
   final _items = <CoreThaanForReceive>[];
   bool _busy = false;
+
+  /// Receive as: just Thaans (the batch in [_items]) or in piles (the
+  /// batches in [_piles]). Switching clears whichever was in progress — a
+  /// batch scanned without piles can't be sorted into them after the fact,
+  /// since which pile each Thaan belongs in is only known at the door with
+  /// the cloth in hand.
+  bool _inPiles = false;
+  final _piles = <_SessionPile>[];
+  int _active = -1;
+
+  List<CoreThaanForReceive> get _pileItems => [for (final p in _piles) ...p.thaans];
+
+  /// Resolves each newly scanned code against `/handovers/lookup-receive`,
+  /// skipping any already in [already]. Shared by both modes so a Thaan
+  /// answers the same way whichever way it's being received.
+  Future<_ScanOutcome<CoreThaanForReceive>> _resolve(List<String> codes, Iterable<CoreThaanForReceive> already) async {
+    final repo = ref.read(handoverRepositoryProvider);
+    final resolved = <CoreThaanForReceive>[];
+    final problems = <ScanProblem>[];
+
+    for (final code in codes) {
+      if (already.any((t) => t.code == code) || resolved.any((t) => t.code == code)) continue;
+      try {
+        resolved.add(await repo.lookupForReceive(code));
+      } catch (e) {
+        problems.add(ScanProblem(code, e));
+      }
+    }
+    return _ScanOutcome(resolved: resolved, problems: problems);
+  }
 
   Future<void> _scan() async {
     final codes = await Navigator.of(context).push<List<String>>(
@@ -428,26 +517,15 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     if (codes == null || codes.isEmpty || !mounted) return;
 
     setState(() => _busy = true);
-    final repo = ref.read(handoverRepositoryProvider);
-    final resolved = <CoreThaanForReceive>[];
-    final problems = <ScanProblem>[];
-
-    for (final code in codes) {
-      if (_items.any((t) => t.code == code)) continue;
-      try {
-        resolved.add(await repo.lookupForReceive(code));
-      } catch (e) {
-        problems.add(ScanProblem(code, e));
-      }
-    }
+    final outcome = await _resolve(codes, _items);
 
     if (!mounted) return;
     setState(() {
-      _items.addAll(resolved);
+      _items.addAll(outcome.resolved);
       _busy = false;
     });
-    if (problems.isNotEmpty) {
-      _showProblemsSheet(context, title: 'Not received', problems: problems);
+    if (outcome.problems.isNotEmpty) {
+      _showProblemsSheet(context, title: 'Not received', problems: outcome.problems);
     }
   }
 
@@ -485,8 +563,120 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     }
   }
 
+  // ── In piles ──
+
+  void _switchMode(bool inPiles) {
+    if (inPiles == _inPiles) return;
+    setState(() {
+      _inPiles = inPiles;
+      _items.clear();
+      _piles.clear();
+      _active = -1;
+    });
+  }
+
+  /// "New pile" / "Next pile": the sheet hands back a pile (made here or
+  /// picked from the drafts), which becomes the active one and opens the
+  /// scanner straight away — the reader has the cloth in hand.
+  Future<void> _newPile() async {
+    final pile = await showAppSheet<_SessionPile>(
+      context,
+      title: _piles.isEmpty ? 'New pile' : 'Next pile',
+      subtitle: 'One design, one colour combination — photograph one Thaan of it.',
+      child: _PileSheet(
+        excludePileIds: {for (final p in _piles) if (p.pileId != null) p.pileId!},
+      ),
+    );
+    if (pile == null || !mounted) return;
+    setState(() {
+      _piles.add(pile);
+      _active = _piles.length - 1;
+    });
+    await _scanIntoActive();
+  }
+
+  Future<void> _scanIntoActive() async {
+    if (_active < 0 || _active >= _piles.length) return;
+    final pile = _piles[_active];
+    final codes = await Navigator.of(context).push<List<String>>(
+      MaterialPageRoute(
+        builder: (_) => ContinuousScanScreen(
+          title: 'Scan into ${pile.name}',
+          already: {for (final t in _pileItems) t.code},
+        ),
+      ),
+    );
+    if (codes == null || codes.isEmpty || !mounted) return;
+
+    setState(() => _busy = true);
+    final outcome = await _resolve(codes, _pileItems);
+
+    if (!mounted) return;
+    setState(() {
+      pile.thaans.addAll(outcome.resolved);
+      _busy = false;
+    });
+    if (outcome.problems.isNotEmpty) {
+      _showProblemsSheet(context, title: 'Not received', problems: outcome.problems);
+    }
+  }
+
+  Future<void> _confirmReceivePiles() async {
+    final all = _pileItems;
+    if (all.isEmpty) return;
+
+    final specs = <ReceivePileSpec>[];
+    final lines = <String>[];
+    for (final p in _piles) {
+      final ids = [for (final t in p.pileable) t.id];
+      if (ids.isEmpty) continue;
+      specs.add(ReceivePileSpec(
+        pileId: p.pileId,
+        newPile: p.isNew ? (name: p.name, mainColourId: p.colourId ?? '', photoKey: p.photoKey ?? '') : null,
+        thaanIds: ids,
+      ));
+      lines.add('${p.label} — ${ids.length} Thaan${ids.length == 1 ? '' : 's'}${p.isNew ? ' (new)' : ''}');
+    }
+    final loose = all.length - specs.fold<int>(0, (n, s) => n + s.thaanIds.length);
+    if (loose > 0) lines.add('$loose without a pile — not back from Print yet');
+
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Receive ${all.length} Thaan${all.length == 1 ? '' : 's'} in ${specs.length} pile${specs.length == 1 ? '' : 's'}?',
+      message: '${lines.map((l) => '• $l').join('\n')}\n\nAll piles go in as one delivery, one bill.',
+      confirmLabel: 'Receive',
+    );
+    if (!ok || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      final message = await ref.read(handoverRepositoryProvider).receiveBatch(
+            [for (final t in all) t.id],
+            piles: specs,
+          );
+      if (!mounted) return;
+      showOk(context, message);
+      setState(() {
+        _piles.clear();
+        _active = -1;
+      });
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final receiveAs = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: _ReceiveAsToggle(inPiles: _inPiles, onChanged: _busy ? null : _switchMode),
+    );
+    return _inPiles ? _buildPiles(receiveAs) : _buildJustThaans(receiveAs);
+  }
+
+  Widget _buildJustThaans(Widget receiveAs) {
     return AppPage(
       title: 'Handovers',
       actions: const [ThemeButton()],
@@ -494,6 +684,7 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
       body: Column(
         children: [
           widget.toggle,
+          receiveAs,
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: InlineNotice(
@@ -548,6 +739,391 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
           onPressed: _items.isEmpty ? null : _confirmReceive,
         ),
       ),
+    );
+  }
+
+  Widget _buildPiles(Widget receiveAs) {
+    final active = _active >= 0 && _active < _piles.length ? _piles[_active] : null;
+    final total = _pileItems.length;
+
+    return AppPage(
+      title: 'Handovers',
+      actions: const [ThemeButton()],
+      padded: false,
+      body: Column(
+        children: [
+          widget.toggle,
+          receiveAs,
+          Expanded(
+            child: _piles.isEmpty
+                ? ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      const InlineNotice(
+                        'Make a pile for the first design in this delivery, then scan its Thaans into it. '
+                        'Anything not back from Print yet is received without a pile.',
+                      ),
+                      const EmptyState(
+                        title: 'No pile yet.',
+                        message: 'Photograph one Thaan, name the pile, pick its main colour.',
+                        icon: Icons.layers_outlined,
+                      ),
+                      AppButton.primary(
+                        label: 'New pile',
+                        icon: Icons.add,
+                        onPressed: _busy ? null : _newPile,
+                      ),
+                    ],
+                  )
+                : ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                    children: [
+                      if (active != null) ...[
+                        _ActivePileCard(pile: active),
+                        SectionHeader(
+                          'In this pile',
+                          trailing: Text('${active.thaans.length}'),
+                        ),
+                        if (active.thaans.isEmpty)
+                          const EmptyState(compact: true, title: 'Nothing scanned into it yet.', icon: Icons.qr_code_scanner)
+                        else
+                          AppListGroup(
+                            children: [
+                              for (final (i, t) in active.thaans.indexed)
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    AppListRow(
+                                      title: t.code,
+                                      titleMono: true,
+                                      subtitle: _pileRowSubtitle(t, active),
+                                      trailing: AppIconButton(
+                                        icon: Icons.close,
+                                        tooltip: 'Remove',
+                                        onPressed: () => setState(() => active.thaans.removeAt(i)),
+                                      ),
+                                    ),
+                                    if (!t.canPile)
+                                      Padding(
+                                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                                        child: InlineNotice(
+                                          '${t.code} is not back from Print — it will be received without a pile.',
+                                          warning: true,
+                                          icon: Icons.error_outline,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                            ],
+                          ),
+                      ],
+                      SectionHeader(
+                        'Piles',
+                        trailing: AppButton.ghost(
+                          label: 'Clear',
+                          compact: true,
+                          onPressed: _busy
+                              ? null
+                              : () => setState(() {
+                                    _piles.clear();
+                                    _active = -1;
+                                  }),
+                        ),
+                      ),
+                      AppListGroup(
+                        children: [
+                          for (final (i, p) in _piles.indexed)
+                            AppListRow(
+                              leading: RowThumb(image: p.image, icon: p.image == null ? Icons.layers_outlined : null),
+                              title: p.name,
+                              subtitle: [
+                                if (p.colourLabel != null && p.colourLabel!.isNotEmpty) p.colourLabel!,
+                                p.isNew ? 'new' : (p.code ?? 'existing'),
+                              ].join(' · '),
+                              selected: i == _active,
+                              trailing: Text(
+                                '${p.thaans.length}',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: context.p.text),
+                              ),
+                              onTap: () => setState(() => _active = i),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      AppButton.secondary(
+                        label: 'Next pile',
+                        icon: Icons.add,
+                        onPressed: _busy ? null : _newPile,
+                      ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
+      bottomBar: BottomActionBar(
+        secondary: AppButton.secondary(
+          label: active == null ? 'Scan' : 'Scan into pile',
+          icon: Icons.qr_code_scanner,
+          onPressed: _busy || active == null ? null : _scanIntoActive,
+        ),
+        primary: AppButton.primary(
+          label: 'Receive${total > 0 ? ' $total' : ''}',
+          icon: Icons.south_west,
+          busy: _busy,
+          onPressed: total == 0 ? null : _confirmReceivePiles,
+        ),
+      ),
+    );
+  }
+
+  /// The row's second line: bale, vendor and trip as in Just Thaans, plus
+  /// where it's moving from when it already sits in a different pile.
+  static String _pileRowSubtitle(CoreThaanForReceive t, _SessionPile pile) {
+    final base = '${t.baleCode} · ${t.vendorName} — ${tripLabel(t.stage, t.throughStage)}';
+    if (t.pileId != null && t.pileId != pile.pileId && t.canPile) {
+      return '$base · moving from ${t.pileName ?? t.pileCode ?? 'another pile'}';
+    }
+    return base;
+  }
+}
+
+/// Just Thaans | In piles — the Receive panel's own two-way switch, the
+/// same shape as Send | Receive above it.
+class _ReceiveAsToggle extends StatelessWidget {
+  const _ReceiveAsToggle({required this.inPiles, required this.onChanged});
+  final bool inPiles;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const FieldLabel('Receive as'),
+        const SizedBox(height: 6),
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<bool>(
+            style: SegmentedButton.styleFrom(minimumSize: const Size(0, 48)),
+            segments: const [
+              ButtonSegment(value: false, label: Text('Just Thaans'), icon: Icon(Icons.view_list_outlined)),
+              ButtonSegment(value: true, label: Text('In piles'), icon: Icon(Icons.layers_outlined)),
+            ],
+            selected: {inPiles},
+            onSelectionChanged: onChanged == null ? null : (s) => onChanged!(s.first),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The pile being scanned into, pinned at the top: its photo, name and
+/// colour, and the count going up as the reader scans.
+class _ActivePileCard extends StatelessWidget {
+  const _ActivePileCard({required this.pile});
+  final _SessionPile pile;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final n = pile.thaans.length;
+    return AppCard(
+      emphasis: true,
+      child: Row(
+        children: [
+          RowThumb(size: 64, image: pile.image, icon: pile.image == null ? Icons.layers_outlined : null),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(pile.name, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: p.text)),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    if (pile.colourLabel != null && pile.colourLabel!.isNotEmpty) pile.colourLabel!,
+                    pile.isNew ? 'New pile' : 'Pile ${pile.code ?? ''}'.trim(),
+                  ].join(' · '),
+                  style: TextStyle(fontSize: 13, color: p.textSecondary),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          StatTile(value: '$n', label: n == 1 ? 'Thaan' : 'Thaans', tone: BadgeTone.brand),
+        ],
+      ),
+    );
+  }
+}
+
+/// New pile: a photo of one Thaan (uploaded the moment it's taken, so the
+/// key is ready when the batch is confirmed), a name and the main colour —
+/// or one of the draft piles already on the server, for a delivery that's
+/// going into piles made at Print. Pops with the [_SessionPile] to scan
+/// into. Rendered inside [showAppSheet].
+class _PileSheet extends ConsumerStatefulWidget {
+  const _PileSheet({required this.excludePileIds});
+
+  /// Draft piles already in this session — offered once, not twice.
+  final Set<String> excludePileIds;
+
+  @override
+  ConsumerState<_PileSheet> createState() => _PileSheetState();
+}
+
+class _PileSheetState extends ConsumerState<_PileSheet> {
+  final _name = TextEditingController();
+  String? _colourId;
+  File? _photo;
+  String? _photoKey;
+  bool _uploading = false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  Future<void> _takePhoto() async {
+    final shot = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 70, maxWidth: 1600);
+    if (shot == null || !mounted) return;
+    final file = File(shot.path);
+    setState(() {
+      _photo = file;
+      _photoKey = null;
+      _uploading = true;
+    });
+    try {
+      final key = await ref.read(pileRepositoryProvider).uploadPhoto(file);
+      if (!mounted) return;
+      setState(() => _photoKey = key);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _photo = null);
+      showError(context, e);
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  // A photo is what makes a pile easy to recognise later, but a camera that
+  // will not open must not stop a delivery being received: name and colour
+  // are enough to start, and the photo can be added on the web.
+  bool get _canStart => _name.text.trim().isNotEmpty && _colourId != null && !_uploading;
+
+  void _start(List<CoreColour> colours) {
+    final label = colours.where((c) => c.id == _colourId).map((c) => c.label).firstOrNull;
+    Navigator.pop(
+      context,
+      _SessionPile.fresh(
+        name: _name.text.trim(),
+        colourId: _colourId,
+        colourLabel: label,
+        photoKey: _photoKey,
+        photoFile: _photo,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final colours = ref.watch(pileColoursProvider);
+    final drafts = ref.watch(pilesProvider('draft'));
+
+    final photoLine = _uploading
+        ? 'Uploading…'
+        : _photoKey != null
+            ? 'Photo taken — tap to retake'
+            : 'Tap to photograph one Thaan of this design';
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const FieldLabel('Photo', required: true),
+        const SizedBox(height: 6),
+        AppCard(
+          onTap: _uploading ? null : _takePhoto,
+          child: Row(
+            children: [
+              RowThumb(
+                size: 64,
+                image: _photo == null ? null : FileImage(_photo!),
+                icon: _photo == null ? Icons.photo_camera_outlined : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Text(photoLine, style: TextStyle(fontSize: 14, color: p.textSecondary))),
+              if (_uploading)
+                SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.2, color: p.primary))
+              else if (_photoKey != null)
+                Icon(Icons.check_circle, color: p.success),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        AppTextField(
+          label: 'Name',
+          required: true,
+          hint: 'e.g. Peacock florals',
+          controller: _name,
+          textCapitalization: TextCapitalization.sentences,
+          textInputAction: TextInputAction.done,
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 12),
+        colours.when(
+          loading: () => const Skeleton(height: 48, radius: 12),
+          error: (e, _) => InlineNotice('$e', icon: Icons.cloud_off_outlined, warning: true),
+          data: (rows) => PickerField(
+            label: 'Main colour',
+            required: true,
+            value: _colourId,
+            hint: 'Choose…',
+            options: [for (final c in rows) PickerOption(c.id, c.label, color: colourSwatch(c.label))],
+            onChanged: (v) => setState(() => _colourId = v),
+          ),
+        ),
+        const SizedBox(height: 16),
+        AppButton.primary(
+          label: 'Start scanning this pile',
+          icon: Icons.qr_code_scanner,
+          busy: _uploading,
+          onPressed: _canStart ? () => _start(colours.value ?? const []) : null,
+        ),
+        const SectionHeader('Use an existing pile', top: 20),
+        drafts.when(
+          loading: () => const LoadingState(rows: 3),
+          error: (e, _) => InlineNotice('$e', icon: Icons.cloud_off_outlined, warning: true),
+          data: (rows) {
+            final offered = [for (final d in rows) if (!widget.excludePileIds.contains(d.id)) d];
+            if (offered.isEmpty) {
+              return const InlineNotice('No draft piles waiting — every delivery into piles starts with a new one.');
+            }
+            return AppListGroup(
+              children: [
+                for (final d in offered)
+                  AppListRow(
+                    leading: RowThumb(
+                      image: d.photoUrl == null ? null : NetworkImage(d.photoUrl!),
+                      icon: d.photoUrl == null ? Icons.layers_outlined : null,
+                    ),
+                    title: d.name,
+                    subtitle: [
+                      if (d.mainColour != null && d.mainColour!.isNotEmpty) d.mainColour!,
+                      '${d.thaanCount} Thaan${d.thaanCount == 1 ? '' : 's'}',
+                      if (d.createdStage != null) 'from ${d.createdStage}',
+                    ].join(' · '),
+                    chevron: true,
+                    onTap: () => Navigator.pop(context, _SessionPile.existing(d)),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
     );
   }
 }
