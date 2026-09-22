@@ -1487,6 +1487,8 @@ class CorePile {
     this.recordName,
     this.stage = '',
     this.needs = const [],
+    this.finishedCount = 0,
+    this.shelvedCount = 0,
   });
 
   final String id;
@@ -1525,6 +1527,15 @@ class CorePile {
   /// "border"); empty once every decided-so-far detail is in.
   final List<String> needs;
 
+  // ── Phase 3: from pile to shelf ──
+
+  /// Thaans back from Ironing that are not stock yet — what "Put on shelf"
+  /// would take. Zero on a Phase 2 server.
+  final int finishedCount;
+
+  /// Thaans already shelved as pieces.
+  final int shelvedCount;
+
   /// Where it is now, falling back to where it was made for a server that
   /// doesn't send `stage` yet.
   String? get stageLabel => stage.isNotEmpty ? stage : createdStage;
@@ -1561,6 +1572,8 @@ class CorePile {
         recordName: _stringOf(json['recordName']),
         stage: _stringOf(json['stage']) ?? '',
         needs: _needsOf(json['needs']),
+        finishedCount: _intOf(json['finishedCount']) ?? 0,
+        shelvedCount: _intOf(json['shelvedCount']) ?? 0,
       );
 }
 
@@ -1721,12 +1734,18 @@ class CorePileThaan {
     this.voidedAt,
     this.openStage,
     this.completedStages = 0,
+    this.pieceCode,
   });
 
   final String id;
   final String code;
   final String? baleCode;
   final String? voidedAt;
+
+  /// Its shelf piece code once it has been shelved — the same as [code],
+  /// since the QR label already on the Thaan is the shelf label. Null while
+  /// it is still in the pipeline.
+  final String? pieceCode;
 
   /// The stage it's out for right now, or null when it's in hand.
   final String? openStage;
@@ -1744,6 +1763,7 @@ class CorePileThaan {
       voidedAt: _stringOf(json['voidedAt']),
       openStage: _stringOf(json['openStage']),
       completedStages: done is List ? done.length : (_intOf(done) ?? 0),
+      pieceCode: _stringOf(json['pieceCode']),
     );
   }
 }
@@ -1780,5 +1800,151 @@ class CorePileEvent {
         detail: json['detail'] is Map ? (json['detail'] as Map).cast<String, dynamic>() : const {},
         actorName: _stringOf(json['actorName']),
         at: _stringOf(json['at']),
+      );
+}
+
+// ── Piles — Phase 3: from pile to shelf ──
+
+/// A Thaan as the shelf draft lists it — just enough to name it.
+class CoreShelfThaan {
+  const CoreShelfThaan({required this.id, required this.code});
+
+  final String id;
+  final String code;
+
+  factory CoreShelfThaan.fromJson(Map<String, dynamic> json) => CoreShelfThaan(
+        id: '${json['id']}',
+        code: _stringOf(json['code']) ?? '',
+      );
+}
+
+/// A location the shelved pieces can go to, as the draft offers it.
+class CoreShelfLocation {
+  const CoreShelfLocation({required this.id, required this.name, required this.code});
+
+  final String id;
+  final String name;
+  final String code;
+
+  factory CoreShelfLocation.fromJson(Map<String, dynamic> json) => CoreShelfLocation(
+        id: '${json['id']}',
+        name: _stringOf(json['name']) ?? _stringOf(json['code']) ?? '',
+        code: _stringOf(json['code']) ?? '',
+      );
+}
+
+/// The five prices a shelved product carries, as rupee strings — "" when
+/// unset. Same shape going up in `POST /piles/:id/shelf` as coming down.
+class CoreShelfPrices {
+  const CoreShelfPrices({
+    this.cost = '',
+    this.making = '',
+    this.wholesale = '',
+    this.retail = '',
+    this.mrp = '',
+  });
+
+  final String cost;
+  final String making;
+  final String wholesale;
+  final String retail;
+  final String mrp;
+
+  factory CoreShelfPrices.fromJson(Map<String, dynamic> json) => CoreShelfPrices(
+        cost: _stringOf(json['cost']) ?? '',
+        making: _stringOf(json['making']) ?? '',
+        wholesale: _stringOf(json['wholesale']) ?? '',
+        retail: _stringOf(json['retail']) ?? '',
+        mrp: _stringOf(json['mrp']) ?? '',
+      );
+
+  Map<String, String> toJson() => {
+        'cost': cost,
+        'making': making,
+        'wholesale': wholesale,
+        'retail': retail,
+        'mrp': mrp,
+      };
+}
+
+/// `GET /piles/:id/shelf` — what the shelf screen shows: which Thaans are
+/// back from Ironing and would go, which are on the shelf already, the
+/// prices set so far, where they can go, and anything in the way.
+class CoreShelfDraft {
+  const CoreShelfDraft({
+    required this.pileId,
+    required this.pileCode,
+    required this.pileName,
+    required this.status,
+    this.colourwayId,
+    this.designCode,
+    this.recordName,
+    this.pieceTracked = false,
+    this.finished = const [],
+    this.shelved = const [],
+    this.inPipeline = 0,
+    this.prices = const CoreShelfPrices(),
+    this.locations = const [],
+    this.blockers = const [],
+  });
+
+  final String pileId;
+  final String pileCode;
+  final String pileName;
+  final String status;
+  final String? colourwayId;
+  final String? designCode;
+  final String? recordName;
+
+  /// Whether the record tracks each piece by its own code.
+  final bool pieceTracked;
+
+  /// Back from Ironing, not yet stock — these are what go on the shelf.
+  final List<CoreShelfThaan> finished;
+
+  /// Already on the shelf as pieces.
+  final List<CoreShelfThaan> shelved;
+
+  /// Still out at a stage — neither finished nor shelved.
+  final int inPipeline;
+  final CoreShelfPrices prices;
+  final List<CoreShelfLocation> locations;
+
+  /// Why the pile can't go on the shelf yet, in the server's words. Empty
+  /// when it can.
+  final List<String> blockers;
+
+  /// "KC-0412 · Peacock florals", or null while there is no record yet.
+  String? get recordLabel {
+    if (designCode == null && recordName == null) return null;
+    return [?designCode, ?recordName].join(' · ');
+  }
+
+  factory CoreShelfDraft.fromJson(Map<String, dynamic> json) => CoreShelfDraft(
+        pileId: '${json['pileId']}',
+        pileCode: _stringOf(json['pileCode']) ?? '',
+        pileName: _stringOf(json['pileName']) ?? '',
+        status: _stringOf(json['status']) ?? 'draft',
+        colourwayId: _stringOf(json['colourwayId']),
+        designCode: _stringOf(json['designCode']),
+        recordName: _stringOf(json['recordName']),
+        pieceTracked: json['pieceTracked'] == true,
+        finished: [
+          for (final t in (json['finished'] as List? ?? const []))
+            CoreShelfThaan.fromJson((t as Map).cast<String, dynamic>()),
+        ],
+        shelved: [
+          for (final t in (json['shelved'] as List? ?? const []))
+            CoreShelfThaan.fromJson((t as Map).cast<String, dynamic>()),
+        ],
+        inPipeline: _intOf(json['inPipeline']) ?? 0,
+        prices: json['prices'] is Map
+            ? CoreShelfPrices.fromJson((json['prices'] as Map).cast<String, dynamic>())
+            : const CoreShelfPrices(),
+        locations: [
+          for (final l in (json['locations'] as List? ?? const []))
+            CoreShelfLocation.fromJson((l as Map).cast<String, dynamic>()),
+        ],
+        blockers: _needsOf(json['blockers']),
       );
 }

@@ -166,6 +166,118 @@ void main() {
       expect(p.colourwayId, isNull);
       expect(p.recordLabel, isNull);
     });
+
+    // Phase 3 — how many are back from Ironing, how many are on the shelf.
+    test('parses the Phase 3 counts', () {
+      final p = CorePile.fromJson({...row, 'status': 'live', 'finishedCount': 3, 'shelvedCount': 5});
+      expect(p.finishedCount, 3);
+      expect(p.shelvedCount, 5);
+    });
+
+    test('a Thaan carries its piece code once shelved, and none before', () {
+      final p = CorePile.fromJson({
+        ...row,
+        'thaans': [
+          {'id': 't-1', 'code': 'T00002041', 'completedStages': 6, 'pieceCode': 'T00002041'},
+          {'id': 't-2', 'code': 'T00002042', 'completedStages': 5, 'pieceCode': null},
+          {'id': 't-3', 'code': 'T00002043', 'completedStages': 4},
+        ],
+      });
+      expect(p.thaans[0].pieceCode, 'T00002041');
+      expect(p.thaans[1].pieceCode, isNull);
+      expect(p.thaans[2].pieceCode, isNull);
+    });
+
+    test('REGRESSION: a Phase 2 server (no counts) reads as nothing finished, nothing shelved', () {
+      final p = CorePile.fromJson(row);
+      expect(p.finishedCount, 0);
+      expect(p.shelvedCount, 0);
+    });
+  });
+
+  group('CoreShelfDraft', () {
+    // GET /api/v1/piles/:id/shelf
+    const shelf = {
+      'pileId': '5f1c0b7e-2a8f-4c1e-9c3d-7a2b1e9f0d11',
+      'pileCode': 'P00000012',
+      'pileName': 'Peacock florals',
+      'status': 'ready',
+      'colourwayId': 'cw-7',
+      'designCode': 'KC-0412',
+      'recordName': 'Peacock florals · Teal',
+      'pieceTracked': true,
+      'finished': [
+        {'id': 't-1', 'code': 'T00002041'},
+        {'id': 't-2', 'code': 'T00002042'},
+      ],
+      'shelved': [
+        {'id': 't-0', 'code': 'T00002040'},
+      ],
+      'inPipeline': 11,
+      'prices': {'cost': '', 'making': '', 'wholesale': '', 'retail': '2850', 'mrp': '3200'},
+      'locations': [
+        {'id': 'loc-1', 'name': 'Shop', 'code': 'SHOP'},
+        {'id': 'loc-2', 'name': 'Godown', 'code': 'GDN'},
+      ],
+      'blockers': [],
+    };
+
+    test('parses the draft', () {
+      final d = CoreShelfDraft.fromJson(shelf);
+      expect(d.pileId, '5f1c0b7e-2a8f-4c1e-9c3d-7a2b1e9f0d11');
+      expect(d.pileCode, 'P00000012');
+      expect(d.pileName, 'Peacock florals');
+      expect(d.status, 'ready');
+      expect(d.colourwayId, 'cw-7');
+      expect(d.designCode, 'KC-0412');
+      expect(d.recordName, 'Peacock florals · Teal');
+      expect(d.recordLabel, 'KC-0412 · Peacock florals · Teal');
+      expect(d.pieceTracked, isTrue);
+      expect(d.finished, hasLength(2));
+      expect(d.finished[0].id, 't-1');
+      expect(d.finished[0].code, 'T00002041');
+      expect(d.shelved, hasLength(1));
+      expect(d.shelved[0].code, 'T00002040');
+      expect(d.inPipeline, 11);
+      expect(d.prices.retail, '2850');
+      expect(d.prices.mrp, '3200');
+      expect(d.prices.cost, '');
+      expect(d.locations, hasLength(2));
+      expect(d.locations[0].id, 'loc-1');
+      expect(d.locations[0].name, 'Shop');
+      expect(d.locations[0].code, 'SHOP');
+      expect(d.blockers, isEmpty);
+    });
+
+    test('blockers come through in the server\'s words', () {
+      final d = CoreShelfDraft.fromJson({
+        ...shelf,
+        'finished': [],
+        'blockers': ['Nothing is back from Ironing yet', 'The record still needs a motif'],
+      });
+      expect(d.finished, isEmpty);
+      expect(d.blockers, hasLength(2));
+      expect(d.blockers[0], 'Nothing is back from Ironing yet');
+    });
+
+    test('prices go up in the same shape they came down', () {
+      const p = CoreShelfPrices(retail: '2850', mrp: '3200');
+      expect(p.toJson(), {'cost': '', 'making': '', 'wholesale': '', 'retail': '2850', 'mrp': '3200'});
+      expect(CoreShelfPrices.fromJson(p.toJson()).retail, '2850');
+    });
+
+    test('a bare draft — no lists, no prices — still parses', () {
+      final d = CoreShelfDraft.fromJson(const {'pileId': 'x', 'pileCode': 'P1', 'pileName': 'n', 'status': 'draft'});
+      expect(d.colourwayId, isNull);
+      expect(d.recordLabel, isNull);
+      expect(d.pieceTracked, isFalse);
+      expect(d.finished, isEmpty);
+      expect(d.shelved, isEmpty);
+      expect(d.inPipeline, 0);
+      expect(d.prices.retail, '');
+      expect(d.locations, isEmpty);
+      expect(d.blockers, isEmpty);
+    });
   });
 
   group('CorePileDraft', () {

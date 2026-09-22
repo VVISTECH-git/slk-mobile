@@ -51,6 +51,14 @@ final pileDraftProvider = FutureProvider.autoDispose.family<CorePileDraft, Strin
   return CorePileDraft.fromJson((data as Map).cast<String, dynamic>());
 });
 
+/// Phase 3 — what the shelf screen shows for one pile: the Thaans back
+/// from Ironing that would go, the ones on the shelf already, the prices
+/// so far, where they can go, and anything in the way. `GET /piles/:id/shelf`.
+final pileShelfProvider = FutureProvider.autoDispose.family<CoreShelfDraft, String>((ref, id) async {
+  final data = await ref.watch(coreApiProvider).get('/piles/$id/shelf');
+  return CoreShelfDraft.fromJson((data as Map).cast<String, dynamic>());
+});
+
 /// What `POST /piles/:id/thaans` did with each Thaan it was given.
 class PileAddOutcome {
   const PileAddOutcome({
@@ -134,6 +142,31 @@ class PileRepository {
       needs: [
         for (final n in (map['needs'] as List? ?? const []))
           if (n != null && '$n'.isNotEmpty) '$n',
+      ],
+    );
+  }
+
+  /// Puts every Thaan back from Ironing on the shelf: each becomes a piece
+  /// with its own code (the QR label already on it), stock at [locationId],
+  /// under the record's product. Retail is the one price the server
+  /// insists on; the others may be "". Repeatable for a live pile as more
+  /// Thaans finish. Returns the product code and the new piece codes.
+  Future<({String message, String productCode, List<String> pieceCodes})> shelve(
+    String pileId, {
+    required CoreShelfPrices prices,
+    required String locationId,
+  }) async {
+    final data = await ref.read(coreApiProvider).post(
+      '/piles/$pileId/shelf',
+      body: {'prices': prices.toJson(), 'locationId': locationId},
+    );
+    final map = (data as Map).cast<String, dynamic>();
+    return (
+      message: '${map['message'] ?? 'On the shelf'}',
+      productCode: '${map['productCode'] ?? ''}',
+      pieceCodes: [
+        for (final c in (map['pieceCodes'] as List? ?? const []))
+          if (c != null && '$c'.isNotEmpty) '$c',
       ],
     );
   }

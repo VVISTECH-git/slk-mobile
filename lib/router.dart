@@ -21,6 +21,7 @@ import 'features/thaans/scan_thaan_screen.dart';
 import 'features/piles/complete_pile_screen.dart';
 import 'features/piles/piles_screen.dart';
 import 'features/piles/pile_detail_screen.dart';
+import 'features/piles/shelf_pile_screen.dart';
 import 'features/stage_summary/stage_summary_screen.dart';
 import 'features/vendors/vendor_detail_screen.dart';
 import 'features/vendors/vendor_ledger_screen.dart';
@@ -234,6 +235,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/core/piles/:id/complete',
         builder: (_, state) => CompletePileScreen(pileId: state.pathParameters['id']!),
+      ),
+      // Phase 3 — put the Thaans back from Ironing on the shelf: price,
+      // location, and each becomes a piece under the record's product.
+      GoRoute(
+        path: '/core/piles/:id/shelf',
+        builder: (_, state) => ShelfPileScreen(pileId: state.pathParameters['id']!),
       ),
 
       // POS + invoices — live.
