@@ -18,6 +18,7 @@ import 'features/bales/record_cutting_screen.dart';
 import 'features/handovers/handovers_screen.dart';
 import 'features/thaans/print_labels_screen.dart';
 import 'features/thaans/scan_thaan_screen.dart';
+import 'features/piles/complete_pile_screen.dart';
 import 'features/piles/piles_screen.dart';
 import 'features/piles/pile_detail_screen.dart';
 import 'features/stage_summary/stage_summary_screen.dart';
@@ -227,6 +228,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/core/piles/:id',
         builder: (_, state) => PileDetailScreen(pileId: state.pathParameters['id']!),
+      ),
+      // Phase 2 — fill in a pile's details (motif, craft, colours), which
+      // makes or patches its Product Management record.
+      GoRoute(
+        path: '/core/piles/:id/complete',
+        builder: (_, state) => CompletePileScreen(pileId: state.pathParameters['id']!),
       ),
 
       // POS + invoices — live.

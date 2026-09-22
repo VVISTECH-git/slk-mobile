@@ -43,6 +43,14 @@ final pileDetailProvider = FutureProvider.autoDispose.family<CorePile, String>((
   return CorePile.fromJson((data as Map).cast<String, dynamic>());
 });
 
+/// Phase 2 — what the complete screen shows for one pile: the details the
+/// bale's cloth item already settled, the ones decided at this stage, and
+/// what has been picked so far. `GET /piles/:id/draft`.
+final pileDraftProvider = FutureProvider.autoDispose.family<CorePileDraft, String>((ref, id) async {
+  final data = await ref.watch(coreApiProvider).get('/piles/$id/draft');
+  return CorePileDraft.fromJson((data as Map).cast<String, dynamic>());
+});
+
 /// What `POST /piles/:id/thaans` did with each Thaan it was given.
 class PileAddOutcome {
   const PileAddOutcome({
@@ -99,6 +107,34 @@ class PileRepository {
       message: '${map['message'] ?? ''}',
       id: '${pile['id']}',
       code: '${pile['code'] ?? ''}',
+    );
+  }
+
+  /// Fills in a pile's details — motif, craft, border, colours. Every field
+  /// key goes up with its current value (null for "not yet"); the first
+  /// save makes the Product Management record, later saves patch it. The
+  /// server answers with what is still missing, if anything.
+  Future<({String message, String? colourwayId, List<String> needs})> complete(
+    String pileId, {
+    required Map<String, String?> attributes,
+    String? colourId,
+    String? secondaryColourId,
+  }) async {
+    final body = <String, dynamic>{
+      'attributes': attributes,
+      'colourId': ?colourId,
+      // Sent even when null, so clearing the secondary colour sticks.
+      'secondaryColourId': secondaryColourId,
+    };
+    final data = await ref.read(coreApiProvider).post('/piles/$pileId/complete', body: body);
+    final map = (data as Map).cast<String, dynamic>();
+    return (
+      message: '${map['message'] ?? 'Saved'}',
+      colourwayId: map['colourwayId'] == null ? null : '${map['colourwayId']}',
+      needs: [
+        for (final n in (map['needs'] as List? ?? const []))
+          if (n != null && '$n'.isNotEmpty) '$n',
+      ],
     );
   }
 

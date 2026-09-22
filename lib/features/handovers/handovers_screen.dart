@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../models/core.dart';
@@ -660,6 +661,20 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
         _piles.clear();
         _active = -1;
       });
+      // The piles are in; their details (motif, craft, colours) are not.
+      // Offer to go and fill them in now, while the Thaans are in hand —
+      // or not: "Later" leaves them on the Piles list under "To complete".
+      if (specs.isNotEmpty) {
+        ref.invalidate(pilesProvider);
+        final now = await showConfirmDialog(
+          context,
+          title: 'Fill in the details now?',
+          message: 'Motif, craft, colours — one pile at a time.',
+          confirmLabel: 'Yes',
+          cancelLabel: 'Later',
+        );
+        if (now && mounted) context.push('/core/piles');
+      }
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {

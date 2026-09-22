@@ -1482,6 +1482,11 @@ class CorePile {
     this.createdByName,
     this.thaans = const [],
     this.events = const [],
+    this.colourwayId,
+    this.designCode,
+    this.recordName,
+    this.stage = '',
+    this.needs = const [],
   });
 
   final String id;
@@ -1506,6 +1511,30 @@ class CorePile {
   final List<CorePileThaan> thaans;
   final List<CorePileEvent> events;
 
+  // ── Phase 2: the Product Management record behind the pile ──
+
+  /// The colourway (record) the first "complete" made; null until then.
+  final String? colourwayId;
+  final String? designCode;
+  final String? recordName;
+
+  /// Where the pile is now — the stage its Thaans are at.
+  final String stage;
+
+  /// Short words for what is still to be filled in ("motif", "craft",
+  /// "border"); empty once every decided-so-far detail is in.
+  final List<String> needs;
+
+  /// Where it is now, falling back to where it was made for a server that
+  /// doesn't send `stage` yet.
+  String? get stageLabel => stage.isNotEmpty ? stage : createdStage;
+
+  /// "KC-0412 · Peacock florals", or null while there is no record yet.
+  String? get recordLabel {
+    if (designCode == null && recordName == null) return null;
+    return [?designCode, ?recordName].join(' · ');
+  }
+
   factory CorePile.fromJson(Map<String, dynamic> json) => CorePile(
         id: '${json['id']}',
         code: _stringOf(json['code']) ?? '',
@@ -1527,8 +1556,161 @@ class CorePile {
           for (final e in (json['events'] as List? ?? const []))
             CorePileEvent.fromJson((e as Map).cast<String, dynamic>()),
         ],
+        colourwayId: _stringOf(json['colourwayId']),
+        designCode: _stringOf(json['designCode']),
+        recordName: _stringOf(json['recordName']),
+        stage: _stringOf(json['stage']) ?? '',
+        needs: _needsOf(json['needs']),
       );
 }
+
+/// `needs` as the server sends it — a list of short words — or nothing.
+List<String> _needsOf(Object? raw) => [
+      for (final n in (raw is List ? raw : const []))
+        if (n != null && '$n'.isNotEmpty) '$n',
+    ];
+
+/// A detail already settled by the bale's cloth item, shown on the complete
+/// screen so nobody types it again.
+class CorePileInherited {
+  const CorePileInherited({required this.key, required this.label, required this.valueLabel});
+
+  final String key;
+  final String label;
+  final String valueLabel;
+
+  factory CorePileInherited.fromJson(Map<String, dynamic> json) => CorePileInherited(
+        key: _stringOf(json['key']) ?? '',
+        label: _stringOf(json['label']) ?? _stringOf(json['key']) ?? '',
+        valueLabel: _stringOf(json['valueLabel']) ?? '—',
+      );
+}
+
+/// One detail to decide on the complete screen: which attribute, which
+/// Master List to pick from, and what (if anything) is picked so far.
+class CorePileField {
+  const CorePileField({
+    required this.key,
+    required this.label,
+    required this.list,
+    this.valueId,
+    this.valueLabel,
+    this.required = false,
+  });
+
+  /// The attribute key sent back in `POST /piles/:id/complete`.
+  final String key;
+  final String label;
+
+  /// The Master List code — `motif`, `craft_technique`, `border_style` —
+  /// which is the key into [CoreOptions].
+  final String list;
+  final String? valueId;
+  final String? valueLabel;
+  final bool required;
+
+  factory CorePileField.fromJson(Map<String, dynamic> json) => CorePileField(
+        key: _stringOf(json['key']) ?? '',
+        label: _stringOf(json['label']) ?? _stringOf(json['key']) ?? '',
+        list: _stringOf(json['list']) ?? '',
+        valueId: _stringOf(json['valueId']),
+        valueLabel: _stringOf(json['valueLabel']),
+        required: json['required'] == true,
+      );
+}
+
+/// `GET /piles/:id/draft` — everything the complete screen needs: what is
+/// inherited, what is to be decided, and what has been decided already.
+class CorePileDraft {
+  const CorePileDraft({
+    required this.pileId,
+    required this.pileCode,
+    required this.pileName,
+    required this.stage,
+    this.colourwayId,
+    this.designCode,
+    this.recordName,
+    this.inherited = const [],
+    this.lengthCm,
+    this.widthCm,
+    this.colourId,
+    this.colourLabel,
+    this.secondaryColourId,
+    this.secondaryColourLabel,
+    this.fields = const [],
+    this.needs = const [],
+  });
+
+  final String pileId;
+  final String pileCode;
+  final String pileName;
+  final String stage;
+  final String? colourwayId;
+  final String? designCode;
+  final String? recordName;
+  final List<CorePileInherited> inherited;
+
+  /// `extra.lengthCm` / `extra.widthCm` — the saree size, when the item
+  /// carries one.
+  final num? lengthCm;
+  final num? widthCm;
+  final String? colourId;
+  final String? colourLabel;
+  final String? secondaryColourId;
+  final String? secondaryColourLabel;
+  final List<CorePileField> fields;
+  final List<String> needs;
+
+  /// "KC-0412 · Peacock florals", or null until the first save makes one.
+  String? get recordLabel {
+    if (designCode == null && recordName == null) return null;
+    return [?designCode, ?recordName].join(' · ');
+  }
+
+  /// "550 × 112 cm", or null when the item has no size.
+  String? get sareeSize {
+    if (lengthCm == null || widthCm == null) return null;
+    return '${_plainNum(lengthCm!)} × ${_plainNum(widthCm!)} cm';
+  }
+
+  factory CorePileDraft.fromJson(Map<String, dynamic> json) {
+    final extra = (json['extra'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return CorePileDraft(
+      pileId: '${json['pileId']}',
+      pileCode: _stringOf(json['pileCode']) ?? '',
+      pileName: _stringOf(json['pileName']) ?? '',
+      stage: _stringOf(json['stage']) ?? '',
+      colourwayId: _stringOf(json['colourwayId']),
+      designCode: _stringOf(json['designCode']),
+      recordName: _stringOf(json['recordName']),
+      inherited: [
+        for (final i in (json['inherited'] as List? ?? const []))
+          CorePileInherited.fromJson((i as Map).cast<String, dynamic>()),
+      ],
+      lengthCm: _numOf(extra['lengthCm']),
+      widthCm: _numOf(extra['widthCm']),
+      colourId: _stringOf(json['colourId']),
+      colourLabel: _stringOf(json['colourLabel']),
+      secondaryColourId: _stringOf(json['secondaryColourId']),
+      secondaryColourLabel: _stringOf(json['secondaryColourLabel']),
+      fields: [
+        for (final f in (json['fields'] as List? ?? const []))
+          CorePileField.fromJson((f as Map).cast<String, dynamic>()),
+      ],
+      needs: _needsOf(json['needs']),
+    );
+  }
+}
+
+num? _numOf(Object? value) {
+  if (value == null) return null;
+  if (value is num) return value;
+  if (value is String) return num.tryParse(value);
+  return null;
+}
+
+/// "550" for 550.0, "112.5" for 112.5 — a size without a trailing ".0".
+String _plainNum(num n) => n == n.roundToDouble() ? '${n.toInt()}' : '$n';
 
 /// One Thaan inside a pile, as the detail lists it.
 class CorePileThaan {

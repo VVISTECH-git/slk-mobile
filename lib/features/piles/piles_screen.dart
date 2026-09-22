@@ -17,19 +17,38 @@ class PilesScreen extends ConsumerStatefulWidget {
 }
 
 class _PilesScreenState extends ConsumerState<PilesScreen> {
+  /// "To complete" — not a server status: every draft or ready pile that
+  /// still has something to fill in. Fetched as All, filtered here.
+  static const _toComplete = 'to-complete';
+
   /// Null is "All" — the query is left off.
-  String? _status = 'draft';
+  String? _status = _toComplete;
 
   static const _filters = <(String?, String)>[
+    (_toComplete, 'To complete'),
     ('draft', 'Draft'),
     ('ready', 'Ready'),
     ('live', 'Live'),
     (null, 'All'),
   ];
 
+  String? get _query => _status == _toComplete ? null : _status;
+
+  static bool _needsCompleting(CorePile p) =>
+      (p.status == 'draft' || p.status == 'ready') && p.needs.isNotEmpty;
+
+  List<CorePile> _visible(List<CorePile> rows) =>
+      _status == _toComplete ? [for (final p in rows) if (_needsCompleting(p)) p] : rows;
+
+  String get _emptyMessage => switch (_status) {
+        _toComplete => 'Nothing to complete — every pile has its details.',
+        null => 'No piles yet.',
+        final s => 'No $s piles.',
+      };
+
   @override
   Widget build(BuildContext context) {
-    final piles = ref.watch(pilesProvider(_status));
+    final piles = ref.watch(pilesProvider(_query));
 
     return AppPage(
       title: 'Piles',
@@ -55,18 +74,21 @@ class _PilesScreenState extends ConsumerState<PilesScreen> {
           Expanded(
             child: AsyncView<List<CorePile>>(
               value: piles,
-              onRetry: () => ref.invalidate(pilesProvider(_status)),
-              isEmpty: (rows) => rows.isEmpty,
-              emptyMessage: _status == null ? 'No piles yet.' : 'No ${_status!} piles.',
-              data: (rows) => RefreshIndicator(
-                onRefresh: () => ref.refresh(pilesProvider(_status).future),
-                child: ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: rows.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (_, i) => _PileRow(pile: rows[i]),
-                ),
-              ),
+              onRetry: () => ref.invalidate(pilesProvider(_query)),
+              isEmpty: (rows) => _visible(rows).isEmpty,
+              emptyMessage: _emptyMessage,
+              data: (rows) {
+                final shown = _visible(rows);
+                return RefreshIndicator(
+                  onRefresh: () => ref.refresh(pilesProvider(_query).future),
+                  child: ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: shown.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (_, i) => _PileRow(pile: shown[i]),
+                  ),
+                );
+              },
             ),
           ),
         ],
@@ -82,9 +104,10 @@ class _PileRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = pile;
+    final stage = p.stageLabel;
     final detail = [
       '${p.thaanCount} Thaan${p.thaanCount == 1 ? '' : 's'}',
-      if (p.createdStage != null) 'from ${p.createdStage}',
+      if (stage != null && stage.isNotEmpty) 'at $stage',
       if (p.createdAt != null) pileDate(p.createdAt),
     ].join(' · ');
 
@@ -102,7 +125,16 @@ class _PileRow extends StatelessWidget {
             child: CardTitle(
               p.mainColour == null || p.mainColour!.isEmpty ? p.name : '${p.name} · ${p.mainColour}',
               subtitle: detail,
-              trailing: pileStatusBadge(p.status),
+              trailing: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  pileStatusBadge(p.status),
+                  if (p.needs.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    pileNeedsBadge(p.needs),
+                  ],
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 6),
@@ -124,6 +156,11 @@ StatusBadge pileStatusBadge(String status) {
   final label = status.isEmpty ? '—' : '${status[0].toUpperCase()}${status.substring(1)}';
   return StatusBadge(label, tone: tone);
 }
+
+/// "Needs motif, craft" — what a pile is still waiting on, in the warning
+/// tone: not wrong, just not done.
+StatusBadge pileNeedsBadge(List<String> needs) =>
+    StatusBadge('Needs ${needs.join(', ')}', tone: BadgeTone.warning);
 
 /// "19 Sep 2026" from whatever the server sent — an ISO timestamp becomes
 /// the app's own date shape; anything else is shown as it came.

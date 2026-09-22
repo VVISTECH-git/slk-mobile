@@ -131,6 +131,113 @@ void main() {
       expect(p.thaanCount, 0);
       expect(p.baleCodes, isEmpty);
     });
+
+    // Phase 2 — the record behind the pile, and what is still to fill in.
+    test('parses the Phase 2 fields', () {
+      final p = CorePile.fromJson({
+        ...row,
+        'colourwayId': 'cw-7',
+        'designCode': 'KC-0412',
+        'recordName': 'Peacock florals · Teal',
+        'stage': 'Nellateeta',
+        'needs': ['motif', 'craft'],
+      });
+      expect(p.colourwayId, 'cw-7');
+      expect(p.designCode, 'KC-0412');
+      expect(p.recordName, 'Peacock florals · Teal');
+      expect(p.stage, 'Nellateeta');
+      expect(p.stageLabel, 'Nellateeta');
+      expect(p.needs, ['motif', 'craft']);
+      expect(p.recordLabel, 'KC-0412 · Peacock florals · Teal');
+    });
+
+    test('a pile with no record yet has null colourway and an empty needs list', () {
+      final p = CorePile.fromJson({...row, 'colourwayId': null, 'designCode': null, 'recordName': null, 'needs': []});
+      expect(p.colourwayId, isNull);
+      expect(p.recordLabel, isNull);
+      expect(p.needs, isEmpty);
+    });
+
+    test('REGRESSION: a Phase 1 server (no stage, no needs) still parses', () {
+      final p = CorePile.fromJson(row);
+      expect(p.stage, '');
+      expect(p.stageLabel, 'Print'); // falls back to where it was made
+      expect(p.needs, isEmpty);
+      expect(p.colourwayId, isNull);
+      expect(p.recordLabel, isNull);
+    });
+  });
+
+  group('CorePileDraft', () {
+    // GET /api/v1/piles/:id/draft
+    const draft = {
+      'pileId': '5f1c0b7e-2a8f-4c1e-9c3d-7a2b1e9f0d11',
+      'pileCode': 'P00000012',
+      'pileName': 'Peacock florals',
+      'stage': 'Nellateeta',
+      'colourwayId': null,
+      'designCode': null,
+      'recordName': null,
+      'inherited': [
+        {'key': 'productType', 'label': 'Product type', 'valueLabel': 'Saree'},
+        {'key': 'fibreType', 'label': 'Fibre', 'valueLabel': 'Cotton'},
+      ],
+      'extra': {'lengthCm': 550, 'widthCm': 112},
+      'colourId': 'teal',
+      'colourLabel': 'Teal',
+      'secondaryColourId': null,
+      'secondaryColourLabel': null,
+      'fields': [
+        {'key': 'motif', 'label': 'Motif', 'list': 'motif', 'valueId': null, 'valueLabel': null, 'required': true},
+        {'key': 'craftTechnique', 'label': 'Craft', 'list': 'craft_technique', 'valueId': 'kalamkari', 'valueLabel': 'Kalamkari', 'required': true},
+        {'key': 'borderStyle', 'label': 'Border', 'list': 'border_style', 'valueId': null, 'valueLabel': null, 'required': false},
+      ],
+      'needs': ['motif'],
+    };
+
+    test('parses the draft', () {
+      final d = CorePileDraft.fromJson(draft);
+      expect(d.pileId, '5f1c0b7e-2a8f-4c1e-9c3d-7a2b1e9f0d11');
+      expect(d.pileCode, 'P00000012');
+      expect(d.pileName, 'Peacock florals');
+      expect(d.stage, 'Nellateeta');
+      expect(d.colourwayId, isNull);
+      expect(d.inherited, hasLength(2));
+      expect(d.inherited[0].key, 'productType');
+      expect(d.inherited[0].label, 'Product type');
+      expect(d.inherited[0].valueLabel, 'Saree');
+      expect(d.lengthCm, 550);
+      expect(d.widthCm, 112);
+      expect(d.sareeSize, '550 × 112 cm');
+      expect(d.colourId, 'teal');
+      expect(d.colourLabel, 'Teal');
+      expect(d.secondaryColourId, isNull);
+      expect(d.fields, hasLength(3));
+      expect(d.fields[0].key, 'motif');
+      expect(d.fields[0].list, 'motif');
+      expect(d.fields[0].valueId, isNull);
+      expect(d.fields[0].required, isTrue);
+      expect(d.fields[1].key, 'craftTechnique');
+      expect(d.fields[1].list, 'craft_technique');
+      expect(d.fields[1].valueId, 'kalamkari');
+      expect(d.fields[1].valueLabel, 'Kalamkari');
+      expect(d.fields[2].required, isFalse);
+      expect(d.needs, ['motif']);
+    });
+
+    test('a size given as decimals or strings still reads cleanly', () {
+      final d = CorePileDraft.fromJson({...draft, 'extra': {'lengthCm': 550.0, 'widthCm': '112.5'}});
+      expect(d.sareeSize, '550 × 112.5 cm');
+    });
+
+    test('no extra, no inherited, no fields — still a draft', () {
+      final d = CorePileDraft.fromJson(const {'pileId': 'x', 'pileCode': 'P1', 'pileName': 'n', 'stage': 'Print'});
+      expect(d.sareeSize, isNull);
+      expect(d.inherited, isEmpty);
+      expect(d.fields, isEmpty);
+      expect(d.needs, isEmpty);
+      expect(d.colourId, isNull);
+    });
   });
 
   group('CoreThaanForReceive', () {
