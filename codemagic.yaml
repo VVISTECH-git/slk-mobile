@@ -70,7 +70,10 @@ workflows:
           flutter build apk --release --build-number=$BUILD_NUMBER
           flutter build appbundle --release --build-number=$BUILD_NUMBER
     artifacts:
-      - build/**/outputs/apk/**/*.apk
+      # Flutter writes the release APK to build/app/outputs/flutter-apk/;
+      # the older Gradle path under outputs/apk/ is not always there. Match
+      # any APK under outputs, so the build page always offers one.
+      - build/**/outputs/**/*.apk
       - build/**/outputs/bundle/**/*.aab
       - build/**/outputs/**/mapping.txt
     publishing:
