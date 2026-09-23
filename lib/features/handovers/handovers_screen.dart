@@ -535,6 +535,11 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     if (!mounted) return;
     setState(() {
       _items.addAll(outcome.resolved);
+      if (_groups.length == 1) {
+        for (final t in outcome.resolved) {
+          if (t.canRecord && t.colourwayId == null) _assignment[t.id] = 0;
+        }
+      }
       _busy = false;
     });
     if (outcome.problems.isNotEmpty) {
@@ -582,7 +587,18 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     if (group == null || !mounted) return null;
     setState(() {
       _groups.add(group);
-      if (forThaan != null) _assignment[forThaan.id] = _groups.length - 1;
+      final index = _groups.length - 1;
+      if (forThaan != null) {
+        _assignment[forThaan.id] = index;
+      } else {
+        // A group made from the card takes everything not yet sorted: the
+        // delivery is usually one design, and nobody should have to tap
+        // each Thaan to say so. A second design is a second group, and
+        // Sort… moves Thaans across.
+        for (final t in _eligible) {
+          if (_assignment[t.id] == null && t.colourwayId == null) _assignment[t.id] = index;
+        }
+      }
     });
     return _groups.length - 1;
   }
@@ -679,8 +695,10 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
       ));
       lines.add('${g.label} — ${ids.length} Thaan${ids.length == 1 ? '' : 's'}${g.isNew ? ' (new record)' : ''}');
     }
-    final plain = _items.where((t) => _assignment[t.id] == null && t.colourwayId == null).length;
-    if (plain > 0 && specs.isNotEmpty) lines.add('$plain received without a record');
+    final unsorted = _eligible.where((t) => _assignment[t.id] == null && t.colourwayId == null).length;
+    if (unsorted > 0) {
+      lines.add('$unsorted back from Print will be received without a record');
+    }
 
     // Named when the whole batch is coming back from one stage — the usual
     // case, and the fact that actually matters to whoever is confirming
@@ -694,7 +712,7 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     final ok = await showConfirmDialog(
       context,
       title: title,
-      message: specs.isEmpty
+      message: lines.isEmpty
           ? 'Confirm all of these are physically back in hand.'
           : '${lines.map((l) => '• $l').join('\n')}\n\nAll of it goes in as one delivery, one bill.',
       confirmLabel: 'Receive',
@@ -857,12 +875,13 @@ class _SortCard extends StatelessWidget {
             'Sort into records',
             subtitle: unsorted == 0
                 ? 'Every Thaan back from Print has a group.'
-                : '$unsorted back from Print still unsorted — tap a Thaan to sort it.',
+                : '$unsorted back from Print still unsorted — make a group, or tap a Thaan to sort it.',
           ),
           const SizedBox(height: 10),
           if (groups.isEmpty)
             const InlineNotice(
-              'Pick a colour and a motif for the first design in this delivery, then tap each Thaan of it.',
+              'Pick a colour and a motif for this delivery — every scanned Thaan goes into that record. '
+              'A second design is a second group; Sort… moves Thaans across.',
               icon: Icons.palette_outlined,
             )
           else
