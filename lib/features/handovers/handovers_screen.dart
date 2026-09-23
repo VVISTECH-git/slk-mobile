@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mobile_scanner/mobile_scanner.dart' show BarcodeFormat;
 
+import '../../core/scan_draft_store.dart';
 import '../../models/core.dart';
 import '../../widgets/ui/ui.dart';
 import '../core/core_auth.dart' show coreOptionsProvider;
@@ -158,6 +160,32 @@ class _ScanOutcome<T> {
   final List<ScanProblem> problems;
 }
 
+/// Runs [lookup] over [codes] a few at a time, keeping the codes' order in
+/// the result. One request per label at a time meant a big receive sat on
+/// its spinner for the better part of a minute after Done.
+Future<_ScanOutcome<T>> _lookupAll<T>(List<String> codes, Future<T> Function(String code) lookup, {int width = 4}) async {
+  final results = List<T?>.filled(codes.length, null);
+  final problems = <ScanProblem>[];
+  var next = 0;
+  Future<void> worker() async {
+    while (next < codes.length) {
+      final i = next++;
+      try {
+        results[i] = await lookup(codes[i]);
+      } catch (e) {
+        problems.add(ScanProblem(codes[i], e));
+      }
+    }
+  }
+
+  await Future.wait([for (var w = 0; w < width; w++) worker()]);
+  return _ScanOutcome(resolved: [for (final r in results) if (r != null) r], problems: problems);
+}
+
+/// Codes of a batch that survives the app being killed, per panel.
+const _sendDraftKey = 'handovers.send';
+const _receiveDraftKey = 'handovers.receive';
+
 // ── Send ─────────────────────────────────────────────────────────────────
 
 class _SendPanel extends ConsumerStatefulWidget {
@@ -178,6 +206,36 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
   String? _through;
   final _items = <CoreThaanForSend>[];
   bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _restore();
+  }
+
+  /// Whatever was scanned before the app closed comes back, looked up
+  /// afresh so a Thaan sent meanwhile drops out with a reason.
+  Future<void> _restore() async {
+    final codes = await ScanDraftStore.instance.read(_sendDraftKey);
+    if (codes.isEmpty || !mounted) return;
+    setState(() => _busy = true);
+    final outcome = await _resolve(codes);
+    if (!mounted) return;
+    setState(() {
+      _items.addAll(outcome.resolved);
+      _dropIneligibleVendor();
+      _busy = false;
+    });
+    _persist();
+    if (outcome.resolved.isNotEmpty) {
+      showOk(context, 'Restored ${outcome.resolved.length} scanned Thaan${outcome.resolved.length == 1 ? '' : 's'} from before the app closed.');
+    }
+    if (outcome.problems.isNotEmpty) {
+      _showProblemsSheet(context, title: 'Not restored', problems: outcome.problems);
+    }
+  }
+
+  void _persist() => ScanDraftStore.instance.save(_sendDraftKey, [for (final t in _items) t.code]);
 
   /// A vendor picked before the stage was known (or before it changed) might
   /// not do the stage that just got locked in — every Thaan goes through
@@ -204,7 +262,12 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
   Future<void> _scan() async {
     final codes = await Navigator.of(context).push<List<String>>(
       MaterialPageRoute(
-        builder: (_) => const ContinuousScanScreen(title: 'Scan to send'),
+        builder: (_) => ContinuousScanScreen(
+          title: 'Scan to send',
+          already: {for (final t in _items) t.code},
+          draftKey: _sendDraftKey,
+          formats: const [BarcodeFormat.qrCode],
+        ),
       ),
     );
     if (codes == null || codes.isEmpty || !mounted) return;
@@ -217,6 +280,7 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
       _dropIneligibleVendor();
       _busy = false;
     });
+    _persist();
     if (outcome.problems.isNotEmpty) {
       _showProblemsSheet(context, title: 'Not sent', problems: outcome.problems);
     }
@@ -231,18 +295,31 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
   Future<_ScanOutcome<CoreThaanForSend>> _resolve(List<String> codes) async {
     final repo = ref.read(handoverRepositoryProvider);
     String? stage = _stage;
+    final fresh = {
+      for (final code in codes)
+        if (!_items.any((t) => t.code == code)) code,
+    }.toList();
     final resolved = <CoreThaanForSend>[];
     final problems = <ScanProblem>[];
 
-    for (final code in codes) {
-      if (_items.any((t) => t.code == code) || resolved.any((t) => t.code == code)) continue;
+    // Until the stage is locked, one at a time: the first success decides
+    // it. From then on, several at once against that stage.
+    var i = 0;
+    while (stage == null && i < fresh.length) {
+      final code = fresh[i++];
       try {
-        final result = await repo.lookupForSend(code: code, stage: stage);
-        stage ??= result.stage;
+        final result = await repo.lookupForSend(code: code, stage: null);
+        stage = result.stage;
         resolved.add(result.thaan);
       } catch (e) {
         problems.add(ScanProblem(code, e));
       }
+    }
+    if (i < fresh.length) {
+      final locked = stage;
+      final rest = await _lookupAll(fresh.sublist(i), (code) async => (await repo.lookupForSend(code: code, stage: locked)).thaan);
+      resolved.addAll(rest.resolved);
+      problems.addAll(rest.problems);
     }
 
     if (stage != null) _stage = stage;
@@ -277,6 +354,7 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
         _items.clear();
         _through = null;
       });
+      _persist();
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -312,11 +390,14 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
                       PickerOption(_inHouse, 'Auto'),
                       ...plainOptions(kSendableStages),
                     ],
-                    onChanged: (v) => setState(() {
-                      _stage = (v == null || v == _inHouse) ? null : v;
-                      _dropIneligibleVendor();
-                      _items.clear();
-                    }),
+                    onChanged: (v) {
+                      setState(() {
+                        _stage = (v == null || v == _inHouse) ? null : v;
+                        _dropIneligibleVendor();
+                        _items.clear();
+                      });
+                      _persist();
+                    },
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -363,7 +444,14 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
               child: SectionHeader(
                 'Scanned',
                 top: 0,
-                trailing: AppButton.ghost(label: 'Clear', compact: true, onPressed: () => setState(_items.clear)),
+                trailing: AppButton.ghost(
+                  label: 'Clear',
+                  compact: true,
+                  onPressed: () {
+                    setState(_items.clear);
+                    _persist();
+                  },
+                ),
               ),
             ),
           Expanded(
@@ -382,7 +470,10 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
                               trailing: AppIconButton(
                                 icon: Icons.close,
                                 tooltip: 'Remove',
-                                onPressed: () => setState(() => _items.removeAt(i)),
+                                onPressed: () {
+                                  setState(() => _items.removeAt(i));
+                                  _persist();
+                                },
                               ),
                             ),
                         ],
@@ -497,25 +588,48 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
   final _groups = <_RecordGroup>[];
   final _assignment = <String, int>{};
 
+  @override
+  void initState() {
+    super.initState();
+    _restore();
+  }
+
+  /// Whatever was scanned before the app closed comes back, looked up
+  /// afresh so a Thaan received meanwhile drops out with a reason. The
+  /// groups do not survive — they are a minute's work; the scanning is not.
+  Future<void> _restore() async {
+    final codes = await ScanDraftStore.instance.read(_receiveDraftKey);
+    if (codes.isEmpty || !mounted) return;
+    setState(() => _busy = true);
+    final outcome = await _resolve(codes);
+    if (!mounted) return;
+    setState(() {
+      _items.addAll(outcome.resolved);
+      _busy = false;
+    });
+    _persist();
+    if (outcome.resolved.isNotEmpty) {
+      showOk(context, 'Restored ${outcome.resolved.length} scanned Thaan${outcome.resolved.length == 1 ? '' : 's'} from before the app closed.');
+    }
+    if (outcome.problems.isNotEmpty) {
+      _showProblemsSheet(context, title: 'Not restored', problems: outcome.problems);
+    }
+  }
+
+  void _persist() => ScanDraftStore.instance.save(_receiveDraftKey, [for (final t in _items) t.code]);
+
   /// The Thaans this receive is allowed to sort — back from Print or later.
   List<CoreThaanForReceive> get _eligible => [for (final t in _items) if (t.canRecord) t];
 
   /// Resolves each newly scanned code against `/handovers/lookup-receive`,
   /// skipping any already in the batch.
-  Future<_ScanOutcome<CoreThaanForReceive>> _resolve(List<String> codes) async {
+  Future<_ScanOutcome<CoreThaanForReceive>> _resolve(List<String> codes) {
     final repo = ref.read(handoverRepositoryProvider);
-    final resolved = <CoreThaanForReceive>[];
-    final problems = <ScanProblem>[];
-
-    for (final code in codes) {
-      if (_items.any((t) => t.code == code) || resolved.any((t) => t.code == code)) continue;
-      try {
-        resolved.add(await repo.lookupForReceive(code));
-      } catch (e) {
-        problems.add(ScanProblem(code, e));
-      }
-    }
-    return _ScanOutcome(resolved: resolved, problems: problems);
+    final fresh = {
+      for (final code in codes)
+        if (!_items.any((t) => t.code == code)) code,
+    }.toList();
+    return _lookupAll(fresh, repo.lookupForReceive);
   }
 
   Future<void> _scan() async {
@@ -524,6 +638,8 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
         builder: (_) => ContinuousScanScreen(
           title: "Scan what's coming back",
           already: {for (final t in _items) t.code},
+          draftKey: _receiveDraftKey,
+          formats: const [BarcodeFormat.qrCode],
         ),
       ),
     );
@@ -542,21 +658,28 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
       }
       _busy = false;
     });
+    _persist();
     if (outcome.problems.isNotEmpty) {
       _showProblemsSheet(context, title: 'Not received', problems: outcome.problems);
     }
   }
 
-  void _clear() => setState(() {
-        _items.clear();
-        _groups.clear();
-        _assignment.clear();
-      });
+  void _clear() {
+    setState(() {
+      _items.clear();
+      _groups.clear();
+      _assignment.clear();
+    });
+    _persist();
+  }
 
-  void _removeItem(int i) => setState(() {
-        _assignment.remove(_items[i].id);
-        _items.removeAt(i);
-      });
+  void _removeItem(int i) {
+    setState(() {
+      _assignment.remove(_items[i].id);
+      _items.removeAt(i);
+    });
+    _persist();
+  }
 
   /// Drops a group; whatever was sorted into it becomes unsorted again, and
   /// the groups after it shift down one.

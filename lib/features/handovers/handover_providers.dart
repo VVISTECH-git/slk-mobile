@@ -133,12 +133,16 @@ class HandoverRepository {
     required List<String> thaanIds,
     String? throughStage,
   }) async {
-    final data = await ref.read(coreApiProvider).post('/handovers/send', body: {
-      'stage': stage,
-      'vendorId': vendorId,
-      'thaanIds': thaanIds,
-      if (throughStage != null) 'throughStage': throughStage,
-    });
+    final data = await ref.read(coreApiProvider).post(
+      '/handovers/send',
+      body: {
+        'stage': stage,
+        'vendorId': vendorId,
+        'thaanIds': thaanIds,
+        if (throughStage != null) 'throughStage': throughStage,
+      },
+      receiveTimeout: _batchTimeout(thaanIds.length),
+    );
     return (data as Map)['message'] as String;
   }
 
@@ -160,7 +164,13 @@ class HandoverRepository {
   Future<String> receiveBatch(List<String> thaanIds, {List<ReceiveRecordSpec>? records}) async {
     final body = <String, dynamic>{'thaanIds': thaanIds};
     if (records != null && records.isNotEmpty) body['records'] = [for (final r in records) r.toJson()];
-    final data = await ref.read(coreApiProvider).post('/handovers/receive', body: body);
+    final data = await ref.read(coreApiProvider).post('/handovers/receive', body: body, receiveTimeout: _batchTimeout(thaanIds.length));
     return (data as Map)['message'] as String;
   }
 }
+
+/// A send or receive is one transaction, a few queries per Thaan. The
+/// client's usual 25-second window suits a screen, not a lorry-load: giving
+/// up early on a batch the server is still committing leaves the phone
+/// showing an error for a delivery that went through.
+Duration _batchTimeout(int count) => Duration(seconds: 60 + count);

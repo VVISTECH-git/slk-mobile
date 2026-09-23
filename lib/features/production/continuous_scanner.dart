@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../../core/scan_draft_store.dart';
 import '../../theme/app_theme.dart';
 
 /// Full-screen continuous scanner: keeps the camera open and accumulates every
@@ -13,6 +14,8 @@ class ContinuousScanScreen extends StatefulWidget {
     super.key,
     this.title = 'Scan pieces',
     this.already = const <String>{},
+    this.draftKey,
+    this.formats = const [BarcodeFormat.all],
   });
 
   final String title;
@@ -21,15 +24,22 @@ class ContinuousScanScreen extends StatefulWidget {
   /// as duplicates rather than re-added.
   final Set<String> already;
 
+  /// When set, every code scanned is written to [ScanDraftStore] under this
+  /// key at once, together with [already], so nothing is lost if the app is
+  /// killed before Done. The owning screen restores and clears it.
+  final String? draftKey;
+
+  /// What the camera looks for. Narrower is lighter on the phone: a screen
+  /// that only ever scans QR labels should say so, rather than have every
+  /// frame searched for a dozen barcode families.
+  final List<BarcodeFormat> formats;
+
   @override
   State<ContinuousScanScreen> createState() => _ContinuousScanScreenState();
 }
 
-class _ContinuousScanScreenState extends State<ContinuousScanScreen> {
-  final _controller = MobileScannerController(
-    detectionSpeed: DetectionSpeed.normal,
-    formats: const [BarcodeFormat.all],
-  );
+class _ContinuousScanScreenState extends State<ContinuousScanScreen> with WidgetsBindingObserver {
+  late final MobileScannerController _controller;
   final _codes = <String>{};
   String? _lastMessage;
   bool _lastWasDup = false;
@@ -37,13 +47,42 @@ class _ContinuousScanScreenState extends State<ContinuousScanScreen> {
   @override
   void initState() {
     super.initState();
+    _controller = MobileScannerController(
+      detectionSpeed: DetectionSpeed.normal,
+      formats: widget.formats,
+    );
     _codes.addAll(widget.already);
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
+  }
+
+  /// The camera is stopped while the app is not in front and restarted when
+  /// it comes back. Left running behind a phone call or a locked screen, it
+  /// is the first thing the OS reclaims — and it takes the app with it.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _controller.start();
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        _controller.stop();
+    }
+  }
+
+  /// Written on every new code, not on Done: Done is the one tap a killed
+  /// app never gets to.
+  void _persist() {
+    final key = widget.draftKey;
+    if (key != null) ScanDraftStore.instance.save(key, _codes);
   }
 
   void _onDetect(BarcodeCapture capture) {
@@ -61,6 +100,7 @@ class _ContinuousScanScreenState extends State<ContinuousScanScreen> {
         continue;
       }
       _codes.add(code);
+      _persist();
       HapticFeedback.lightImpact();
       SystemSound.play(SystemSoundType.click);
       setState(() {
@@ -91,6 +131,7 @@ class _ContinuousScanScreenState extends State<ContinuousScanScreen> {
     if (code != null && code.isNotEmpty && mounted) {
       setState(() {
         if (_codes.add(code)) {
+          _persist();
           _lastMessage = code;
           _lastWasDup = false;
         } else {
