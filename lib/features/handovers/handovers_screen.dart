@@ -679,8 +679,7 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
       ));
       lines.add('${g.label} — ${ids.length} Thaan${ids.length == 1 ? '' : 's'}${g.isNew ? ' (new record)' : ''}');
     }
-    final sorted = specs.fold<int>(0, (n, s) => n + s.thaanIds.length);
-    final plain = _items.length - sorted;
+    final plain = _items.where((t) => _assignment[t.id] == null && t.colourwayId == null).length;
     if (plain > 0 && specs.isNotEmpty) lines.add('$plain received without a record');
 
     // Named when the whole batch is coming back from one stage — the usual
@@ -764,7 +763,8 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
                         _SortCard(
                           groups: _groups,
                           countIn: _countIn,
-                          unsorted: _eligible.where((t) => _assignment[t.id] == null).length,
+                          // One already in a record stays there unless moved — that's sorted.
+                          unsorted: _eligible.where((t) => _assignment[t.id] == null && t.colourwayId == null).length,
                           onNewGroup: _busy ? null : () => _newGroup(),
                           onRemoveGroup: _busy ? null : _removeGroup,
                         ),
@@ -813,7 +813,7 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
         children: [
           if (t.canRecord)
             AppButton.ghost(
-              label: g?.shortLabel ?? 'Sort…',
+              label: g?.shortLabel ?? (t.colourwayId == null ? 'Sort…' : (t.recordCode ?? 'In a record')),
               icon: Icons.expand_more,
               compact: true,
               onPressed: _busy ? null : () => _pickGroupFor(t),

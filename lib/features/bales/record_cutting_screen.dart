@@ -38,8 +38,10 @@ class _RecordCuttingScreenState extends ConsumerState<RecordCuttingScreen> {
   }
 
   void _openRecordSheet(CoreBale bale) {
-    if (bale.status == 'cut' || bale.status == 'returned') {
-      showError(context, '${bale.code} is already ${bale.status == 'cut' ? 'cut' : 'returned'} — nothing more to record.');
+    // A cut bale still opens: its Thaans may not have codes yet, and this
+    // sheet is the phone's only way to give them some.
+    if (bale.status == 'returned') {
+      showError(context, '${bale.code} was returned — nothing more to record.');
       return;
     }
     showAppSheet<void>(
@@ -286,19 +288,23 @@ class _RecordThaansSheetState extends ConsumerState<_RecordThaansSheet> {
     final busy = _recording || _completing || _generatingQr;
     final qrRemaining = _bale.thaanCount - _bale.qrGeneratedCount;
     final hintStyle = TextStyle(fontSize: 12, color: p.textMuted);
+    final cut = _bale.status == 'cut';
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         InlineNotice(
-          _bale.thaanCount > 0
-              ? '${_bale.thaanCount} Thaan${_bale.thaanCount == 1 ? '' : 's'} recorded so far.'
-              : 'No Thaans recorded yet.',
+          cut
+              ? 'Cutting is complete — ${_bale.thaanCount} Thaan${_bale.thaanCount == 1 ? '' : 's'}.'
+              : _bale.thaanCount > 0
+                  ? '${_bale.thaanCount} Thaan${_bale.thaanCount == 1 ? '' : 's'} recorded so far.'
+                  : 'No Thaans recorded yet.',
           icon: Icons.content_cut,
         ),
-        const SizedBox(height: 14),
-        AppTextField(
+        if (!cut) ...[
+          const SizedBox(height: 14),
+          AppTextField(
           label: 'Thaans just cut',
           controller: _count,
           autofocus: true,
@@ -320,11 +326,12 @@ class _RecordThaansSheetState extends ConsumerState<_RecordThaansSheet> {
           busy: _completing,
           onPressed: busy || _bale.thaanCount == 0 ? null : _complete,
         ),
-        if (_bale.thaanCount == 0)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text('Record at least one Thaan before this bale can be marked cut.', style: hintStyle),
-          ),
+          if (_bale.thaanCount == 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('Record at least one Thaan before this bale can be marked cut.', style: hintStyle),
+            ),
+        ],
         const SectionHeader('QR codes', top: 20),
         InlineNotice(
           _bale.thaanCount == 0
