@@ -210,12 +210,16 @@ class _ThaanCard extends StatelessWidget {
           KeyValueRow('Stock', _stockLine(t), strong: t.stockStatus == 'On shelf'),
           if (t.voidedAt == null) ...[
             const SizedBox(height: 14),
-            AppButton.secondary(
-              label: t.colourwayId == null ? 'Put in a record' : 'Move to a record',
-              icon: Icons.inventory_2_outlined,
-              onPressed: onRecord,
-            ),
-            const SizedBox(height: 10),
+            // On the shelf it is stock; moving stock is a movement on the
+            // record, not a re-sort at the door.
+            if (t.pieceCode == null) ...[
+              AppButton.secondary(
+                label: t.colourwayId == null ? 'Put in a record' : 'Move to a record',
+                icon: Icons.inventory_2_outlined,
+                onPressed: onRecord,
+              ),
+              const SizedBox(height: 10),
+            ],
             AppButton.danger(
               label: 'Flag as damaged',
               icon: Icons.report_gmailerrorred_outlined,

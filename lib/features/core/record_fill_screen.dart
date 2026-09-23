@@ -182,7 +182,10 @@ class _RecordFillScreenState extends ConsumerState<RecordFillScreen> {
         ),
 
         // ── Decided here ──
-        SectionHeader(d.stage.isEmpty ? 'Fill in' : 'Decided at ${d.stage} — fill in'),
+        // Only Print decides anything a record is filed under; later stages
+        // are washes and ironing, so the heading names Print whatever stage
+        // the Thaans have reached.
+        const SectionHeader('Decided at Print — fill in'),
         if (d.needs.isNotEmpty) ...[
           InlineNotice('Still needs ${d.needs.join(', ')}.', icon: Icons.pending_outlined, warning: true),
           const SizedBox(height: 12),
