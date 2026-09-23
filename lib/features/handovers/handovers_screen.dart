@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart' show BarcodeFormat;
 
+import '../../core/api_client.dart' show ApiException;
 import '../../core/scan_draft_store.dart';
 import '../../models/core.dart';
 import '../../widgets/ui/ui.dart';
@@ -155,9 +158,15 @@ class _ModeToggle extends StatelessWidget {
 /// A resolved scan the reader hasn't sent/received yet, plus whatever went
 /// wrong resolving codes that didn't make it into the batch.
 class _ScanOutcome<T> {
-  _ScanOutcome({required this.resolved, required this.problems});
+  _ScanOutcome({required this.resolved, required this.problems, this.waiting = const []});
   final List<T> resolved;
+
+  /// Refused by the server — the wrong stage, voided, unknown.
   final List<ScanProblem> problems;
+
+  /// Never reached the server. Not a refusal: kept on the screen and looked
+  /// up again once there is a connection.
+  final List<String> waiting;
 }
 
 /// Runs [lookup] over [codes] a few at a time, keeping the codes' order in
@@ -166,12 +175,19 @@ class _ScanOutcome<T> {
 Future<_ScanOutcome<T>> _lookupAll<T>(List<String> codes, Future<T> Function(String code) lookup, {int width = 4}) async {
   final results = List<T?>.filled(codes.length, null);
   final problems = <ScanProblem>[];
+  final waiting = <String>[];
   var next = 0;
   Future<void> worker() async {
     while (next < codes.length) {
       final i = next++;
       try {
         results[i] = await lookup(codes[i]);
+      } on ApiException catch (e) {
+        if (e.isOffline) {
+          waiting.add(codes[i]);
+        } else {
+          problems.add(ScanProblem(codes[i], e));
+        }
       } catch (e) {
         problems.add(ScanProblem(codes[i], e));
       }
@@ -179,8 +195,54 @@ Future<_ScanOutcome<T>> _lookupAll<T>(List<String> codes, Future<T> Function(Str
   }
 
   await Future.wait([for (var w = 0; w < width; w++) worker()]);
-  return _ScanOutcome(resolved: [for (final r in results) if (r != null) r], problems: problems);
+  return _ScanOutcome(resolved: [for (final r in results) if (r != null) r], problems: problems, waiting: waiting);
 }
+
+/// The scanned labels the server has not answered for yet, as a list with
+/// a Retry. Kept on the phone with the rest of the batch; looked up again
+/// on Retry, when the app comes back to the front, and every so often
+/// while any remain.
+class _WaitingList extends StatelessWidget {
+  const _WaitingList({required this.codes, required this.busy, required this.onRetry, required this.onRemove});
+
+  final List<String> codes;
+  final bool busy;
+  final VoidCallback onRetry;
+  final void Function(int index) onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    if (codes.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionHeader(
+          'Waiting for connection · ${codes.length}',
+          trailing: AppButton.ghost(label: 'Retry', icon: Icons.refresh, compact: true, onPressed: busy ? null : onRetry),
+        ),
+        const Padding(
+          padding: EdgeInsets.only(bottom: 8),
+          child: InlineNotice('Scanned, but the server could not be reached to check them. They stay here until it can.', warning: true),
+        ),
+        AppListGroup(
+          children: [
+            for (final (i, code) in codes.indexed)
+              AppListRow(
+                title: code,
+                titleMono: true,
+                dense: true,
+                subtitle: 'Not checked yet',
+                trailing: AppIconButton(icon: Icons.close, tooltip: 'Remove', onPressed: busy ? null : () => onRemove(i)),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// How often the waiting labels are tried again on their own.
+const _retryEvery = Duration(seconds: 20);
 
 /// Codes of a batch that survives the app being killed, per panel.
 const _sendDraftKey = 'handovers.send';
@@ -196,7 +258,7 @@ class _SendPanel extends ConsumerStatefulWidget {
   ConsumerState<_SendPanel> createState() => _SendPanelState();
 }
 
-class _SendPanelState extends ConsumerState<_SendPanel> {
+class _SendPanelState extends ConsumerState<_SendPanel> with WidgetsBindingObserver {
   String? _stage;
   // Null means not chosen yet — see _vendorInHouse for why this can't
   // default to "in-house".
@@ -205,12 +267,27 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
   // combined one (this vendor doing several stages in a single visit).
   String? _through;
   final _items = <CoreThaanForSend>[];
+  final _waiting = <String>[];
   bool _busy = false;
+  Timer? _retryTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _restore();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _retryTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _retryWaiting();
   }
 
   /// Whatever was scanned before the app closed comes back, looked up
@@ -221,12 +298,11 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
     setState(() => _busy = true);
     final outcome = await _resolve(codes);
     if (!mounted) return;
+    _take(outcome);
     setState(() {
-      _items.addAll(outcome.resolved);
       _dropIneligibleVendor();
       _busy = false;
     });
-    _persist();
     if (outcome.resolved.isNotEmpty) {
       showOk(context, 'Restored ${outcome.resolved.length} scanned Thaan${outcome.resolved.length == 1 ? '' : 's'} from before the app closed.');
     }
@@ -235,7 +311,42 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
     }
   }
 
-  void _persist() => ScanDraftStore.instance.save(_sendDraftKey, [for (final t in _items) t.code]);
+  /// Folds a lookup's outcome into the batch: answered ones join the list,
+  /// unanswered ones wait. Then saves, and keeps the retry going or not.
+  void _take(_ScanOutcome<CoreThaanForSend> outcome) {
+    setState(() {
+      _items.addAll(outcome.resolved);
+      for (final code in outcome.waiting) {
+        if (!_waiting.contains(code)) _waiting.add(code);
+      }
+    });
+    _persist();
+    _scheduleRetry();
+  }
+
+  void _scheduleRetry() {
+    _retryTimer?.cancel();
+    _retryTimer = _waiting.isEmpty ? null : Timer(_retryEvery, _retryWaiting);
+  }
+
+  Future<void> _retryWaiting() async {
+    if (_waiting.isEmpty || _busy || !mounted) return;
+    setState(() => _busy = true);
+    final codes = List<String>.of(_waiting);
+    final outcome = await _resolve(codes);
+    if (!mounted) return;
+    setState(() {
+      _waiting.removeWhere((c) => !outcome.waiting.contains(c));
+      _busy = false;
+    });
+    _take(outcome);
+    setState(_dropIneligibleVendor);
+    if (outcome.problems.isNotEmpty) {
+      _showProblemsSheet(context, title: 'Not sent', problems: outcome.problems);
+    }
+  }
+
+  void _persist() => ScanDraftStore.instance.save(_sendDraftKey, [for (final t in _items) t.code, ..._waiting]);
 
   /// A vendor picked before the stage was known (or before it changed) might
   /// not do the stage that just got locked in — every Thaan goes through
@@ -275,12 +386,11 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
     setState(() => _busy = true);
     final outcome = await _resolve(codes);
     if (!mounted) return;
+    _take(outcome);
     setState(() {
-      _items.addAll(outcome.resolved);
       _dropIneligibleVendor();
       _busy = false;
     });
-    _persist();
     if (outcome.problems.isNotEmpty) {
       _showProblemsSheet(context, title: 'Not sent', problems: outcome.problems);
     }
@@ -304,6 +414,7 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
 
     // Until the stage is locked, one at a time: the first success decides
     // it. From then on, several at once against that stage.
+    final waiting = <String>[];
     var i = 0;
     while (stage == null && i < fresh.length) {
       final code = fresh[i++];
@@ -311,6 +422,14 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
         final result = await repo.lookupForSend(code: code, stage: null);
         stage = result.stage;
         resolved.add(result.thaan);
+      } on ApiException catch (e) {
+        if (!e.isOffline) {
+          problems.add(ScanProblem(code, e));
+          continue;
+        }
+        // No connection: nothing more will answer either. The rest wait.
+        waiting.addAll(fresh.sublist(i - 1));
+        i = fresh.length;
       } catch (e) {
         problems.add(ScanProblem(code, e));
       }
@@ -320,10 +439,11 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
       final rest = await _lookupAll(fresh.sublist(i), (code) async => (await repo.lookupForSend(code: code, stage: locked)).thaan);
       resolved.addAll(rest.resolved);
       problems.addAll(rest.problems);
+      waiting.addAll(rest.waiting);
     }
 
     if (stage != null) _stage = stage;
-    return _ScanOutcome(resolved: resolved, problems: problems);
+    return _ScanOutcome(resolved: resolved, problems: problems, waiting: waiting);
   }
 
   Future<void> _confirmSend() async {
@@ -333,9 +453,10 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
     final ok = await showConfirmDialog(
       context,
       title: 'Send ${_items.length} Thaan${_items.length == 1 ? '' : 's'} for ${tripLabel(stage, _through)}?',
-      message: _vendorId == _vendorInHouse
-          ? 'Going to in-house.'
-          : 'Going to ${ref.read(coreVendorsProvider).value?.firstWhere((v) => v.id == _vendorId).name ?? 'that vendor'}.',
+      message: (_vendorId == _vendorInHouse
+              ? 'Going to in-house.'
+              : 'Going to ${ref.read(coreVendorsProvider).value?.firstWhere((v) => v.id == _vendorId).name ?? 'that vendor'}.') +
+          (_waiting.isEmpty ? '' : '\n\n${_waiting.length} still waiting for connection stay on this screen.'),
       confirmLabel: 'Send',
     );
     if (!ok || !mounted) return;
@@ -448,18 +569,32 @@ class _SendPanelState extends ConsumerState<_SendPanel> {
                   label: 'Clear',
                   compact: true,
                   onPressed: () {
-                    setState(_items.clear);
+                    setState(() {
+                      _items.clear();
+                      _waiting.clear();
+                    });
                     _persist();
+                    _scheduleRetry();
                   },
                 ),
               ),
             ),
           Expanded(
-            child: _items.isEmpty
+            child: _items.isEmpty && _waiting.isEmpty
                 ? const EmptyState(title: 'Nothing scanned yet.', icon: Icons.qr_code_scanner)
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     children: [
+                      _WaitingList(
+                        codes: _waiting,
+                        busy: _busy,
+                        onRetry: _retryWaiting,
+                        onRemove: (i) {
+                          setState(() => _waiting.removeAt(i));
+                          _persist();
+                          _scheduleRetry();
+                        },
+                      ),
                       AppListGroup(
                         children: [
                           for (final (i, t) in _items.indexed)
@@ -579,7 +714,7 @@ class _RecordGroup {
   String get shortLabel => code ?? label;
 }
 
-class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
+class _ReceivePanelState extends ConsumerState<_ReceivePanel> with WidgetsBindingObserver {
   final _items = <CoreThaanForReceive>[];
   bool _busy = false;
 
@@ -587,11 +722,26 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
   /// eligible Thaan is sorted into (by Thaan id; absent means none).
   final _groups = <_RecordGroup>[];
   final _assignment = <String, int>{};
+  final _waiting = <String>[];
+  Timer? _retryTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _restore();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _retryTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _retryWaiting();
   }
 
   /// Whatever was scanned before the app closed comes back, looked up
@@ -603,11 +753,8 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     setState(() => _busy = true);
     final outcome = await _resolve(codes);
     if (!mounted) return;
-    setState(() {
-      _items.addAll(outcome.resolved);
-      _busy = false;
-    });
-    _persist();
+    _take(outcome);
+    setState(() => _busy = false);
     if (outcome.resolved.isNotEmpty) {
       showOk(context, 'Restored ${outcome.resolved.length} scanned Thaan${outcome.resolved.length == 1 ? '' : 's'} from before the app closed.');
     }
@@ -616,7 +763,46 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     }
   }
 
-  void _persist() => ScanDraftStore.instance.save(_receiveDraftKey, [for (final t in _items) t.code]);
+  /// Folds a lookup's outcome into the batch: answered ones join the list
+  /// (and the one open group, if that is how this receive is being sorted),
+  /// unanswered ones wait. Then saves, and keeps the retry going or not.
+  void _take(_ScanOutcome<CoreThaanForReceive> outcome) {
+    setState(() {
+      _items.addAll(outcome.resolved);
+      if (_groups.length == 1) {
+        for (final t in outcome.resolved) {
+          if (t.canRecord && t.colourwayId == null) _assignment[t.id] = 0;
+        }
+      }
+      for (final code in outcome.waiting) {
+        if (!_waiting.contains(code)) _waiting.add(code);
+      }
+    });
+    _persist();
+    _scheduleRetry();
+  }
+
+  void _scheduleRetry() {
+    _retryTimer?.cancel();
+    _retryTimer = _waiting.isEmpty ? null : Timer(_retryEvery, _retryWaiting);
+  }
+
+  Future<void> _retryWaiting() async {
+    if (_waiting.isEmpty || _busy || !mounted) return;
+    setState(() => _busy = true);
+    final outcome = await _resolve(List<String>.of(_waiting));
+    if (!mounted) return;
+    setState(() {
+      _waiting.removeWhere((c) => !outcome.waiting.contains(c));
+      _busy = false;
+    });
+    _take(outcome);
+    if (outcome.problems.isNotEmpty) {
+      _showProblemsSheet(context, title: 'Not received', problems: outcome.problems);
+    }
+  }
+
+  void _persist() => ScanDraftStore.instance.save(_receiveDraftKey, [for (final t in _items) t.code, ..._waiting]);
 
   /// The Thaans this receive is allowed to sort — back from Print or later.
   List<CoreThaanForReceive> get _eligible => [for (final t in _items) if (t.canRecord) t];
@@ -649,28 +835,24 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     final outcome = await _resolve(codes);
 
     if (!mounted) return;
-    setState(() {
-      _items.addAll(outcome.resolved);
-      if (_groups.length == 1) {
-        for (final t in outcome.resolved) {
-          if (t.canRecord && t.colourwayId == null) _assignment[t.id] = 0;
-        }
-      }
-      _busy = false;
-    });
-    _persist();
+    _take(outcome);
+    setState(() => _busy = false);
     if (outcome.problems.isNotEmpty) {
       _showProblemsSheet(context, title: 'Not received', problems: outcome.problems);
     }
   }
 
-  void _clear() {
+  /// Clear wipes the batch; a receive that went through leaves the labels
+  /// still waiting for a connection, since they were not part of it.
+  void _clear({bool keepWaiting = false}) {
     setState(() {
       _items.clear();
       _groups.clear();
       _assignment.clear();
+      if (!keepWaiting) _waiting.clear();
     });
     _persist();
+    _scheduleRetry();
   }
 
   void _removeItem(int i) {
@@ -835,9 +1017,10 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
     final ok = await showConfirmDialog(
       context,
       title: title,
-      message: lines.isEmpty
-          ? 'Confirm all of these are physically back in hand.'
-          : '${lines.map((l) => '• $l').join('\n')}\n\nAll of it goes in as one delivery, one bill.',
+      message: (lines.isEmpty
+              ? 'Confirm all of these are physically back in hand.'
+              : '${lines.map((l) => '• $l').join('\n')}\n\nAll of it goes in as one delivery, one bill.') +
+          (_waiting.isEmpty ? '' : '\n\n${_waiting.length} still waiting for connection stay on this screen.'),
       confirmLabel: 'Receive',
     );
     if (!ok || !mounted) return;
@@ -850,7 +1033,7 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
           );
       if (!mounted) return;
       showOk(context, message);
-      _clear();
+      _clear(keepWaiting: true);
       if (specs.isNotEmpty) {
         ref.invalidate(pipelineRecordsProvider);
         ref.invalidate(coreRecordsProvider);
@@ -889,11 +1072,21 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> {
               ),
             ),
           Expanded(
-            child: _items.isEmpty
+            child: _items.isEmpty && _waiting.isEmpty
                 ? const EmptyState(title: 'Nothing scanned yet.', icon: Icons.qr_code_scanner)
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     children: [
+                      _WaitingList(
+                        codes: _waiting,
+                        busy: _busy,
+                        onRetry: _retryWaiting,
+                        onRemove: (i) {
+                          setState(() => _waiting.removeAt(i));
+                          _persist();
+                          _scheduleRetry();
+                        },
+                      ),
                       AppListGroup(
                         children: [
                           for (final (i, t) in _items.indexed) _thaanRow(i, t),

@@ -40,6 +40,11 @@ class ApiException implements Exception {
 
   bool get isUnauthorized => status == 401;
 
+  /// The server never answered — no connection, or it took too long. The
+  /// request may well succeed later exactly as it was; a screen that can
+  /// hold on to its input should, rather than report it as refused.
+  bool get isOffline => status == null;
+
   @override
   String toString() => message;
 }
