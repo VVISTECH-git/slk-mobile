@@ -4,7 +4,7 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
-        android:label="Sree Lakshmi Kalamkari"
+        android:label="SLK Mobile"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
