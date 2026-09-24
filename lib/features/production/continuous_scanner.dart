@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/scan_draft_store.dart';
@@ -110,6 +111,27 @@ class _ContinuousScanScreenState extends State<ContinuousScanScreen> with Widget
     }
   }
 
+  /// Labels photographed earlier, read from the photo library — several
+  /// pictures at once, each contributing whatever codes it holds.
+  Future<void> _fromPhotos() async {
+    final picked = await ImagePicker().pickMultiImage();
+    if (picked.isEmpty || !mounted) return;
+    var found = 0;
+    for (final photo in picked) {
+      final capture = await _controller.analyzeImage(photo.path);
+      if (capture == null) continue;
+      found += capture.barcodes.where((b) => b.rawValue != null && b.rawValue!.isNotEmpty).length;
+      _onDetect(capture);
+    }
+    if (!mounted) return;
+    if (found == 0) {
+      setState(() {
+        _lastMessage = 'No code found in ${picked.length == 1 ? 'that photo' : 'those photos'}';
+        _lastWasDup = true;
+      });
+    }
+  }
+
   Future<void> _manualEntry() async {
     final c = TextEditingController();
     final code = await showDialog<String>(
@@ -149,6 +171,7 @@ class _ContinuousScanScreenState extends State<ContinuousScanScreen> with Widget
       appBar: AppBar(
         title: Text('${widget.title} · ${_codes.length}'),
         actions: [
+          IconButton(onPressed: _fromPhotos, icon: const Icon(Icons.photo_library_outlined), tooltip: 'Read from photos'),
           IconButton(onPressed: _manualEntry, icon: const Icon(Icons.keyboard_outlined), tooltip: 'Type a code'),
           IconButton(onPressed: () => _controller.toggleTorch(), icon: const Icon(Icons.flashlight_on_outlined)),
           IconButton(onPressed: () => _controller.switchCamera(), icon: const Icon(Icons.cameraswitch_outlined)),
@@ -179,7 +202,9 @@ class _ContinuousScanScreenState extends State<ContinuousScanScreen> with Widget
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      _lastWasDup ? 'Already scanned: $_lastMessage' : 'Added: $_lastMessage',
+                      _lastMessage!.startsWith('No code')
+                          ? _lastMessage!
+                          : (_lastWasDup ? 'Already scanned: $_lastMessage' : 'Added: $_lastMessage'),
                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                     ),
                   ),

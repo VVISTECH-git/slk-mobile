@@ -14,7 +14,7 @@
 		<key>NSCameraUsageDescription</key>
 		<string>Used to scan product barcodes and take product photos.</string>
 		<key>NSPhotoLibraryUsageDescription</key>
-		<string>Used to choose product photos from your library.</string>
+		<string>Used to choose product photos, and to read QR labels from photos you already have.</string>
 		<key>CFBundleExecutable</key>
 		<string>$(EXECUTABLE_NAME)</string>
 		<key>CFBundleIdentifier</key>
