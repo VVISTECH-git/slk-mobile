@@ -244,6 +244,56 @@ class _WaitingList extends StatelessWidget {
 /// How often the waiting labels are tried again on their own.
 const _retryEvery = Duration(seconds: 20);
 
+/// Where a Bluetooth handheld scanner's reads land. Such a scanner is a
+/// keyboard to the phone: it types the code and presses Enter. This field
+/// takes each one, hands it over, clears and keeps focus, so a stack of
+/// labels can be shot one after another without touching the screen. Typing
+/// a code by hand works the same way.
+class _GunField extends StatefulWidget {
+  const _GunField({required this.onCode, required this.busy});
+
+  final Future<void> Function(String code) onCode;
+  final bool busy;
+
+  @override
+  State<_GunField> createState() => _GunFieldState();
+}
+
+class _GunFieldState extends State<_GunField> {
+  final _controller = TextEditingController();
+  final _focus = FocusNode();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit(String raw) async {
+    final code = raw.trim();
+    _controller.clear();
+    _focus.requestFocus();
+    if (code.isEmpty) return;
+    await widget.onCode(code);
+    if (mounted) _focus.requestFocus();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppTextField(
+      label: 'Handheld scanner or type a code',
+      hint: 'Tap here once, then scan',
+      controller: _controller,
+      focusNode: _focus,
+      enabled: !widget.busy,
+      textCapitalization: TextCapitalization.characters,
+      textInputAction: TextInputAction.done,
+      onSubmitted: _submit,
+    );
+  }
+}
+
 /// Codes of a batch that survives the app being killed, per panel.
 const _sendDraftKey = 'handovers.send';
 const _receiveDraftKey = 'handovers.receive';
@@ -347,6 +397,22 @@ class _SendPanelState extends ConsumerState<_SendPanel> with WidgetsBindingObser
   }
 
   void _persist() => ScanDraftStore.instance.save(_sendDraftKey, [for (final t in _items) t.code, ..._waiting]);
+
+  /// One code from the handheld field: the same lookup as the camera's Done, for one label.
+  Future<void> _addCode(String code) async {
+    if (_items.any((t) => t.code == code)) return;
+    setState(() => _busy = true);
+    final outcome = await _resolve([code]);
+    if (!mounted) return;
+    _take(outcome);
+    setState(() {
+      _dropIneligibleVendor();
+      _busy = false;
+    });
+    if (outcome.problems.isNotEmpty) {
+      _showProblemsSheet(context, title: 'Not sent', problems: outcome.problems);
+    }
+  }
 
   /// A vendor picked before the stage was known (or before it changed) might
   /// not do the stage that just got locked in — every Thaan goes through
@@ -559,6 +625,10 @@ class _SendPanelState extends ConsumerState<_SendPanel> with WidgetsBindingObser
                 onChanged: (v) => setState(() => _through = (v == null || v == _inHouse) ? null : v),
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: _GunField(onCode: _addCode, busy: _busy),
+          ),
           if (_items.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -803,6 +873,19 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> with WidgetsBindin
   }
 
   void _persist() => ScanDraftStore.instance.save(_receiveDraftKey, [for (final t in _items) t.code, ..._waiting]);
+
+  /// One code from the handheld field: the same lookup as the camera's Done, for one label.
+  Future<void> _addCode(String code) async {
+    if (_items.any((t) => t.code == code)) return;
+    setState(() => _busy = true);
+    final outcome = await _resolve([code]);
+    if (!mounted) return;
+    _take(outcome);
+    setState(() => _busy = false);
+    if (outcome.problems.isNotEmpty) {
+      _showProblemsSheet(context, title: 'Not received', problems: outcome.problems);
+    }
+  }
 
   /// The Thaans this receive is allowed to sort — back from Print or later.
   List<CoreThaanForReceive> get _eligible => [for (final t in _items) if (t.canRecord) t];
@@ -1061,6 +1144,10 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> with WidgetsBindin
             child: InlineNotice(
               "Scan whatever's coming back — it doesn't matter which stage or which vendor each piece is from.",
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: _GunField(onCode: _addCode, busy: _busy),
           ),
           if (_items.isNotEmpty)
             Padding(

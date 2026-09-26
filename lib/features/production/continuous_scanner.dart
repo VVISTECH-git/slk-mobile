@@ -143,6 +143,8 @@ class _ContinuousScanScreenState extends State<ContinuousScanScreen> with Widget
           autofocus: true,
           textCapitalization: TextCapitalization.characters,
           decoration: const InputDecoration(labelText: 'Tag code'),
+          // A handheld scanner ends its read with Enter.
+          onSubmitted: (v) => Navigator.pop(context, v.trim()),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
