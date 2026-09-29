@@ -341,7 +341,7 @@ class _LiveScannerState extends State<_LiveScanner> with WidgetsBindingObserver 
                   color: Colors.black,
                   child: Center(
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      padding: const EdgeInsets.only(left: 20, right: 60),
                       child: Text(
                         error.errorCode == MobileScannerErrorCode.permissionDenied
                             ? 'Camera not allowed — turn it on in iPhone Settings > SLK Mobile. The scanner gun still works.'
@@ -364,17 +364,23 @@ class _LiveScannerState extends State<_LiveScanner> with WidgetsBindingObserver 
                   ),
                 ),
               ),
-            if (_on)
-              Center(
-                child: Container(
-                  width: 120,
-                  height: 96,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.85), width: 2),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-              ),
+            // The aiming frame, only while the camera is really running —
+            // never drawn over the "camera did not start" message.
+            ValueListenableBuilder<MobileScannerState>(
+              valueListenable: _controller,
+              builder: (context, cam, _) => !_on || !cam.isRunning || cam.error != null
+                  ? const SizedBox.shrink()
+                  : Center(
+                      child: Container(
+                        width: 110,
+                        height: 90,
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.85), width: 2),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+            ),
             Positioned(
               left: 10,
               bottom: 8,
@@ -388,9 +394,11 @@ class _LiveScannerState extends State<_LiveScanner> with WidgetsBindingObserver 
               ),
             ),
             Positioned(
-              right: 4,
-              top: 4,
-              child: Row(
+              right: 6,
+              top: 0,
+              bottom: 0,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _StripButton(icon: Icons.keyboard_outlined, tooltip: 'Type a code', onPressed: _type),
                   if (_on) _StripButton(icon: Icons.flashlight_on_outlined, tooltip: 'Torch', onPressed: () => _controller.toggleTorch()),
@@ -418,11 +426,18 @@ class _StripButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(left: 4),
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Material(
         color: Colors.black.withValues(alpha: 0.55),
         shape: const CircleBorder(),
-        child: IconButton(icon: Icon(icon, color: Colors.white, size: 20), tooltip: tooltip, onPressed: onPressed),
+        child: IconButton(
+          icon: Icon(icon, color: Colors.white, size: 19),
+          tooltip: tooltip,
+          onPressed: onPressed,
+          visualDensity: VisualDensity.compact,
+          constraints: const BoxConstraints.tightFor(width: 38, height: 38),
+          padding: EdgeInsets.zero,
+        ),
       ),
     );
   }
