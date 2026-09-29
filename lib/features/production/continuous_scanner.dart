@@ -69,14 +69,18 @@ class _ContinuousScanScreenState extends State<ContinuousScanScreen> with Widget
   /// is the first thing the OS reclaims — and it takes the app with it.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Leave the camera alone until it has been allowed: the permission
+    // prompt itself makes the app inactive and then resumed.
+    if (!_controller.value.hasCameraPermission) return;
     switch (state) {
       case AppLifecycleState.resumed:
         _controller.start();
       case AppLifecycleState.inactive:
+        _controller.stop();
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
-        _controller.stop();
+        return;
     }
   }
 

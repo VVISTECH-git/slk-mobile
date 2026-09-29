@@ -238,31 +238,48 @@ class _LiveScanner extends StatefulWidget {
 }
 
 class _LiveScannerState extends State<_LiveScanner> with WidgetsBindingObserver {
+  // Started and stopped here, not by the MobileScanner widget: the library's
+  // own pattern when the screen manages the camera's lifecycle. Letting both
+  // start it, or stopping it while the "allow camera" prompt had the app
+  // briefly inactive, is what left the strip showing "An unexpected error".
   final _controller = MobileScannerController(
+    autoStart: false,
     detectionSpeed: DetectionSpeed.normal,
     formats: const [BarcodeFormat.qrCode],
   );
+  StreamSubscription<BarcodeCapture>? _reads;
   bool _on = true;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _reads = _controller.barcodes.listen(_detect);
+    unawaited(_controller.start());
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _controller.dispose();
+    unawaited(_reads?.cancel());
+    unawaited(_controller.dispose());
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      if (_on) _controller.start();
-    } else {
-      _controller.stop();
+    // Before the camera has been allowed, the prompt itself makes the app
+    // inactive and then resumed — leave the camera alone until it is.
+    if (!_controller.value.hasCameraPermission) return;
+    switch (state) {
+      case AppLifecycleState.resumed:
+        if (_on) unawaited(_controller.start());
+      case AppLifecycleState.inactive:
+        unawaited(_controller.stop());
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+        return;
     }
   }
 
@@ -278,7 +295,7 @@ class _LiveScannerState extends State<_LiveScanner> with WidgetsBindingObserver 
 
   void _toggle() {
     setState(() => _on = !_on);
-    if (!_on) _controller.stop();
+    unawaited(_on ? _controller.start() : _controller.stop());
   }
 
   Future<void> _type() async {
@@ -312,9 +329,32 @@ class _LiveScannerState extends State<_LiveScanner> with WidgetsBindingObserver 
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (_on)
-              MobileScanner(controller: _controller, onDetect: _detect)
-            else
+            MobileScanner(
+              controller: _controller,
+              errorBuilder: (context, error, child) => GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () async {
+                  await _controller.stop();
+                  await _controller.start();
+                },
+                child: ColoredBox(
+                  color: Colors.black,
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text(
+                        error.errorCode == MobileScannerErrorCode.permissionDenied
+                            ? 'Camera not allowed — turn it on in iPhone Settings > SLK Mobile. The scanner gun still works.'
+                            : 'Camera did not start — tap here to try again. The scanner gun still works.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (!_on)
               const ColoredBox(
                 color: Colors.black,
                 child: Center(
