@@ -97,14 +97,86 @@ class HandoversScreen extends StatefulWidget {
 class _HandoversScreenState extends State<HandoversScreen> {
   bool _sending = true;
 
+  /// One camera for the whole screen, handed to whichever panel is showing.
+  /// The iPhone runs one camera session at a time; when each panel had its
+  /// own, switching Send/Receive started the new one before the old one had
+  /// shut down, and the new one lost ("Camera did not start").
+  final _camera = _HandoverCamera();
+
+  @override
+  void initState() {
+    super.initState();
+    _camera.open();
+  }
+
+  @override
+  void dispose() {
+    _camera.close();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     // Each panel frames itself in an [AppPage] so its own Send / Receive
     // confirm can sit in the page's [BottomActionBar]; the Send / Receive
     // toggle is handed down to sit at the top of either body. Switching
-    // swaps the whole panel (and so its scanned batch), as it always did.
+    // swaps the whole panel (and so its scanned batch), as it always did —
+    // the camera stays running across the switch.
     final toggle = _ModeToggle(sending: _sending, onChanged: (v) => setState(() => _sending = v));
-    return _sending ? _SendPanel(toggle: toggle) : _ReceivePanel(toggle: toggle);
+    return _sending ? _SendPanel(toggle: toggle, camera: _camera) : _ReceivePanel(toggle: toggle, camera: _camera);
+  }
+}
+
+/// The Handovers camera: started once when the screen opens, stopped while
+/// the app is not in front, closed when the screen closes. Reads every frame
+/// (unrestricted), so a label is read the moment it is sharp; the intake
+/// ignores the repeats. Switchable off to save battery when only the gun is
+/// used.
+class _HandoverCamera extends ChangeNotifier with WidgetsBindingObserver {
+  final controller = MobileScannerController(
+    autoStart: false,
+    detectionSpeed: DetectionSpeed.unrestricted,
+    formats: const [BarcodeFormat.qrCode],
+  );
+  bool on = true;
+
+  void open() {
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(controller.start());
+  }
+
+  void close() {
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(controller.dispose());
+    dispose();
+  }
+
+  void toggle() {
+    on = !on;
+    unawaited(on ? controller.start() : controller.stop());
+    notifyListeners();
+  }
+
+  Future<void> retry() async {
+    await controller.stop();
+    if (on) await controller.start();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Before the camera has been allowed, the prompt itself makes the app
+    // inactive and then resumed — leave the camera alone until it is.
+    if (!controller.value.hasCameraPermission) return;
+    switch (state) {
+      case AppLifecycleState.resumed:
+        if (on) unawaited(controller.start());
+      case AppLifecycleState.inactive:
+        unawaited(controller.stop());
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+        return;
+    }
   }
 }
 
@@ -230,57 +302,36 @@ const _retryEvery = Duration(seconds: 20);
 /// code by hand. The camera can be switched off to save battery when only
 /// the gun is in use, and stops whenever the app is not in front.
 class _LiveScanner extends StatefulWidget {
-  const _LiveScanner({required this.onCode});
+  const _LiveScanner({required this.camera, required this.onCode});
+  final _HandoverCamera camera;
   final void Function(String code) onCode;
 
   @override
   State<_LiveScanner> createState() => _LiveScannerState();
 }
 
-class _LiveScannerState extends State<_LiveScanner> with WidgetsBindingObserver {
-  // Started and stopped here, not by the MobileScanner widget: the library's
-  // own pattern when the screen manages the camera's lifecycle. Letting both
-  // start it, or stopping it while the "allow camera" prompt had the app
-  // briefly inactive, is what left the strip showing "An unexpected error".
-  final _controller = MobileScannerController(
-    autoStart: false,
-    detectionSpeed: DetectionSpeed.normal,
-    formats: const [BarcodeFormat.qrCode],
-  );
+class _LiveScannerState extends State<_LiveScanner> {
   StreamSubscription<BarcodeCapture>? _reads;
-  bool _on = true;
+
+  MobileScannerController get _controller => widget.camera.controller;
+  bool get _on => widget.camera.on;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _reads = _controller.barcodes.listen(_detect);
-    unawaited(_controller.start());
+    widget.camera.addListener(_changed);
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
+    widget.camera.removeListener(_changed);
     unawaited(_reads?.cancel());
-    unawaited(_controller.dispose());
     super.dispose();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Before the camera has been allowed, the prompt itself makes the app
-    // inactive and then resumed — leave the camera alone until it is.
-    if (!_controller.value.hasCameraPermission) return;
-    switch (state) {
-      case AppLifecycleState.resumed:
-        if (_on) unawaited(_controller.start());
-      case AppLifecycleState.inactive:
-        unawaited(_controller.stop());
-      case AppLifecycleState.detached:
-      case AppLifecycleState.hidden:
-      case AppLifecycleState.paused:
-        return;
-    }
+  void _changed() {
+    if (mounted) setState(() {});
   }
 
   void _detect(BarcodeCapture capture) {
@@ -293,10 +344,7 @@ class _LiveScannerState extends State<_LiveScanner> with WidgetsBindingObserver 
     }
   }
 
-  void _toggle() {
-    setState(() => _on = !_on);
-    unawaited(_on ? _controller.start() : _controller.stop());
-  }
+  void _toggle() => widget.camera.toggle();
 
   Future<void> _type() async {
     final c = TextEditingController();
@@ -333,10 +381,7 @@ class _LiveScannerState extends State<_LiveScanner> with WidgetsBindingObserver 
               controller: _controller,
               errorBuilder: (context, error, child) => GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: () async {
-                  await _controller.stop();
-                  await _controller.start();
-                },
+                onTap: widget.camera.retry,
                 child: ColoredBox(
                   color: Colors.black,
                   child: Center(
@@ -566,8 +611,9 @@ const _receiveDraftKey = 'handovers.receive';
 // ── Send ─────────────────────────────────────────────────────────────────
 
 class _SendPanel extends ConsumerStatefulWidget {
-  const _SendPanel({required this.toggle});
+  const _SendPanel({required this.toggle, required this.camera});
   final Widget toggle;
+  final _HandoverCamera camera;
 
   @override
   ConsumerState<_SendPanel> createState() => _SendPanelState();
@@ -865,7 +911,7 @@ class _SendPanelState extends ConsumerState<_SendPanel>
             ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: _LiveScanner(onCode: _enqueue),
+            child: _LiveScanner(camera: widget.camera, onCode: _enqueue),
           ),
           _intakeStatus(),
           if (_items.isNotEmpty)
@@ -943,8 +989,9 @@ class _SendPanelState extends ConsumerState<_SendPanel>
 // ── Receive ──────────────────────────────────────────────────────────────
 
 class _ReceivePanel extends ConsumerStatefulWidget {
-  const _ReceivePanel({required this.toggle});
+  const _ReceivePanel({required this.toggle, required this.camera});
   final Widget toggle;
+  final _HandoverCamera camera;
 
   @override
   ConsumerState<_ReceivePanel> createState() => _ReceivePanelState();
@@ -1357,7 +1404,7 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel>
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: _LiveScanner(onCode: _enqueue),
+            child: _LiveScanner(camera: widget.camera, onCode: _enqueue),
           ),
           _intakeStatus(),
           if (_items.isNotEmpty)
