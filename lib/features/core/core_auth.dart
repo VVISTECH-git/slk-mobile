@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/connection_monitor.dart';
 import '../../core/config.dart';
 import '../../core/storage.dart';
 import '../../models/core.dart';
@@ -42,6 +43,7 @@ final coreApiProvider = Provider<ApiClient>((ref) {
   return ApiClient(
     baseUrl: CoreConfig.apiRoot,
     readToken: _coreToken,
+    onReachability: ConnectionMonitor.instance.report,
     onUnauthorized: () {
       try {
         // The token is already dead — asking the server to revoke it would

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api_client.dart';
 import '../../models/core.dart';
 import '../../widgets/ui/ui.dart';
+import '../../widgets/scanner_wedge.dart';
 import '../core/pipeline_providers.dart';
 import '../core/records_list_screen.dart' show coreRecordsProvider;
 import '../handovers/handover_providers.dart' show coreVendorsProvider;
@@ -119,7 +120,11 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return AppPage(
+    return ScannerWedge(
+      onCode: (code) {
+        if (!_busy) _lookup(code);
+      },
+      child: AppPage(
       title: 'Scan a Thaan',
       actions: const [ThemeButton()],
       padded: false,
@@ -165,6 +170,7 @@ class _ScanThaanScreenState extends ConsumerState<ScanThaanScreen> {
           onPressed: _busy ? null : _cameraScan,
         ),
       ),
+    ),
     );
   }
 }

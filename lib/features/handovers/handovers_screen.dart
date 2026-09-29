@@ -1,18 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mobile_scanner/mobile_scanner.dart' show BarcodeFormat;
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/api_client.dart' show ApiException;
 import '../../core/scan_draft_store.dart';
 import '../../models/core.dart';
+import '../../widgets/scanner_wedge.dart';
 import '../../widgets/ui/ui.dart';
 import '../core/core_auth.dart' show coreOptionsProvider;
 import '../core/pipeline_providers.dart';
 import '../core/record_fields.dart' show narrow;
 import '../core/records_list_screen.dart' show coreRecordsProvider;
-import '../production/continuous_scanner.dart';
 import 'handover_providers.dart';
 
 const _inHouse = '';
@@ -75,27 +76,6 @@ List<String> summarizeProblems(List<ScanProblem> problems) {
       else
         '${group.length} Thaans ${_pluralizeReason(group.first._reason)}'.trim(),
   ];
-}
-
-/// The scans that didn't make it into the batch, one notice per reason —
-/// see [summarizeProblems]. Shared by Send ("Not sent") and Receive ("Not
-/// received").
-void _showProblemsSheet(BuildContext context, {required String title, required List<ScanProblem> problems}) {
-  final lines = summarizeProblems(problems);
-  showAppSheet<void>(
-    context,
-    title: title,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (final line in lines)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: InlineNotice(line, warning: true, icon: Icons.error_outline),
-          ),
-      ],
-    ),
-  );
 }
 
 /// Kora to Shelf, step three: a Thaan's trip through the stage pipeline.
@@ -244,52 +224,282 @@ class _WaitingList extends StatelessWidget {
 /// How often the waiting labels are tried again on their own.
 const _retryEvery = Duration(seconds: 20);
 
-/// Where a Bluetooth handheld scanner's reads land. Such a scanner is a
-/// keyboard to the phone: it types the code and presses Enter. This field
-/// takes each one, hands it over, clears and keeps focus, so a stack of
-/// labels can be shot one after another without touching the screen. Typing
-/// a code by hand works the same way.
-class _GunField extends StatefulWidget {
-  const _GunField({required this.onCode, required this.busy});
-
-  final Future<void> Function(String code) onCode;
-  final bool busy;
+/// The camera, live on the Handovers screen itself: hold a label in front
+/// of it and the Thaan goes in, with nothing to open or tap. The scanner gun
+/// works at the same time (see [ScannerWedge]); the keyboard icon types a
+/// code by hand. The camera can be switched off to save battery when only
+/// the gun is in use, and stops whenever the app is not in front.
+class _LiveScanner extends StatefulWidget {
+  const _LiveScanner({required this.onCode});
+  final void Function(String code) onCode;
 
   @override
-  State<_GunField> createState() => _GunFieldState();
+  State<_LiveScanner> createState() => _LiveScannerState();
 }
 
-class _GunFieldState extends State<_GunField> {
-  final _controller = TextEditingController();
-  final _focus = FocusNode();
+class _LiveScannerState extends State<_LiveScanner> with WidgetsBindingObserver {
+  final _controller = MobileScannerController(
+    detectionSpeed: DetectionSpeed.normal,
+    formats: const [BarcodeFormat.qrCode],
+  );
+  bool _on = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
-    _focus.dispose();
     super.dispose();
   }
 
-  Future<void> _submit(String raw) async {
-    final code = raw.trim();
-    _controller.clear();
-    _focus.requestFocus();
-    if (code.isEmpty) return;
-    await widget.onCode(code);
-    if (mounted) _focus.requestFocus();
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (_on) _controller.start();
+    } else {
+      _controller.stop();
+    }
+  }
+
+  void _detect(BarcodeCapture capture) {
+    // A sheet or dialog on top (sorting a group, confirming) is not the
+    // moment to add whatever the camera happens to see behind it.
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+    for (final b in capture.barcodes) {
+      final code = b.rawValue?.trim();
+      if (code != null && code.isNotEmpty) widget.onCode(code);
+    }
+  }
+
+  void _toggle() {
+    setState(() => _on = !_on);
+    if (!_on) _controller.stop();
+  }
+
+  Future<void> _type() async {
+    final c = TextEditingController();
+    final code = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Type a code'),
+        content: TextField(
+          controller: c,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(labelText: 'Thaan code', hintText: 'e.g. T00002048'),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('Add')),
+        ],
+      ),
+    );
+    if (code != null && code.isNotEmpty) widget.onCode(code);
   }
 
   @override
   Widget build(BuildContext context) {
-    return AppTextField(
-      label: 'Handheld scanner or type a code',
-      hint: 'Tap here once, then scan',
-      controller: _controller,
-      focusNode: _focus,
-      enabled: !widget.busy,
-      textCapitalization: TextCapitalization.characters,
-      textInputAction: TextInputAction.done,
-      onSubmitted: _submit,
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(
+        height: 150,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_on)
+              MobileScanner(controller: _controller, onDetect: _detect)
+            else
+              const ColoredBox(
+                color: Colors.black,
+                child: Center(
+                  child: Text(
+                    'Camera off — the scanner gun still works',
+                    style: TextStyle(color: Colors.white70, fontSize: 13.5, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            if (_on)
+              Center(
+                child: Container(
+                  width: 120,
+                  height: 96,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.85), width: 2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            Positioned(
+              left: 10,
+              bottom: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(8)),
+                child: const Text(
+                  'Show a label, or pull the gun trigger',
+                  style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 4,
+              top: 4,
+              child: Row(
+                children: [
+                  _StripButton(icon: Icons.keyboard_outlined, tooltip: 'Type a code', onPressed: _type),
+                  if (_on) _StripButton(icon: Icons.flashlight_on_outlined, tooltip: 'Torch', onPressed: () => _controller.toggleTorch()),
+                  _StripButton(
+                    icon: _on ? Icons.videocam_off_outlined : Icons.videocam_outlined,
+                    tooltip: _on ? 'Camera off' : 'Camera on',
+                    onPressed: _toggle,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StripButton extends StatelessWidget {
+  const _StripButton({required this.icon, required this.tooltip, required this.onPressed});
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.55),
+        shape: const CircleBorder(),
+        child: IconButton(icon: Icon(icon, color: Colors.white, size: 20), tooltip: tooltip, onPressed: onPressed),
+      ),
+    );
+  }
+}
+
+/// How each panel takes scans in, from the camera strip or the gun: every
+/// code joins a queue and is checked with the server in the order it came,
+/// a few at a time. Nothing to tap between scans. A good one lands in the
+/// list with a tick of feedback; a refused one is named in red above the
+/// list — never a pop-up, which would stop the next trigger pull — and is
+/// ignored for a few seconds so a label left in front of the camera does
+/// not repeat its complaint.
+mixin _ScanIntake<W extends ConsumerStatefulWidget, T> on ConsumerState<W> {
+  final _queue = <String>[];
+  final _recentBad = <String, DateTime>{};
+  final _rejects = <String>[];
+  bool _draining = false;
+
+  /// Whether this code is already in the batch, or waiting for a connection.
+  bool _has(String code);
+  Future<_ScanOutcome<T>> _resolve(List<String> codes);
+  void _take(_ScanOutcome<T> outcome);
+
+  /// Anything the panel must re-check after new Thaans join (Send: the vendor).
+  void _afterTake() {}
+
+  /// A send or receive is being confirmed — scans wait until it is done.
+  bool get _holdScans;
+
+  bool get _checking => _queue.isNotEmpty;
+
+  void _enqueue(String raw) {
+    final code = raw.trim();
+    if (code.isEmpty || _holdScans) return;
+    if (_has(code) || _queue.contains(code)) return;
+    final bad = _recentBad[code];
+    if (bad != null && DateTime.now().difference(bad) < const Duration(seconds: 8)) return;
+    HapticFeedback.selectionClick();
+    setState(() => _queue.add(code));
+    _drain();
+  }
+
+  Future<void> _drain() async {
+    if (_draining) return;
+    _draining = true;
+    try {
+      while (_queue.isNotEmpty && mounted) {
+        final batch = List<String>.of(_queue);
+        final outcome = await _resolve(batch);
+        if (!mounted) return;
+        setState(() => _queue.removeWhere(batch.contains));
+        _take(outcome);
+        setState(_afterTake);
+        if (outcome.resolved.isNotEmpty) {
+          HapticFeedback.lightImpact();
+          SystemSound.play(SystemSoundType.click);
+        }
+        _reject(outcome.problems);
+      }
+    } finally {
+      _draining = false;
+    }
+  }
+
+  void _reject(List<ScanProblem> problems) {
+    if (problems.isEmpty || !mounted) return;
+    final now = DateTime.now();
+    for (final p in problems) {
+      _recentBad[p.code] = now;
+    }
+    HapticFeedback.heavyImpact();
+    setState(() {
+      _rejects.insertAll(0, summarizeProblems(problems));
+      if (_rejects.length > 4) _rejects.removeRange(4, _rejects.length);
+    });
+  }
+
+  /// "Checking 3…" while the queue drains, and the latest refusals in red.
+  Widget _intakeStatus() {
+    if (!_checking && _rejects.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_checking)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                  const SizedBox(width: 8),
+                  Text('Checking ${_queue.length}…', style: const TextStyle(fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          if (_rejects.isNotEmpty)
+            Stack(
+              children: [
+                InlineNotice(
+                  _rejects.join('\n'),
+                  warning: true,
+                  icon: Icons.error_outline,
+                ),
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  child: IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    tooltip: 'Dismiss',
+                    onPressed: () => setState(_rejects.clear),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
     );
   }
 }
@@ -308,7 +518,17 @@ class _SendPanel extends ConsumerStatefulWidget {
   ConsumerState<_SendPanel> createState() => _SendPanelState();
 }
 
-class _SendPanelState extends ConsumerState<_SendPanel> with WidgetsBindingObserver {
+class _SendPanelState extends ConsumerState<_SendPanel>
+    with WidgetsBindingObserver, _ScanIntake<_SendPanel, CoreThaanForSend> {
+  @override
+  bool _has(String code) => _items.any((t) => t.code == code) || _waiting.contains(code);
+
+  @override
+  void _afterTake() => _dropIneligibleVendor();
+
+  @override
+  bool get _holdScans => _busy;
+
   String? _stage;
   // Null means not chosen yet — see _vendorInHouse for why this can't
   // default to "in-house".
@@ -357,12 +577,13 @@ class _SendPanelState extends ConsumerState<_SendPanel> with WidgetsBindingObser
       showOk(context, 'Restored ${outcome.resolved.length} scanned Thaan${outcome.resolved.length == 1 ? '' : 's'} from before the app closed.');
     }
     if (outcome.problems.isNotEmpty) {
-      _showProblemsSheet(context, title: 'Not restored', problems: outcome.problems);
+      _reject(outcome.problems);
     }
   }
 
   /// Folds a lookup's outcome into the batch: answered ones join the list,
   /// unanswered ones wait. Then saves, and keeps the retry going or not.
+  @override
   void _take(_ScanOutcome<CoreThaanForSend> outcome) {
     setState(() {
       _items.addAll(outcome.resolved);
@@ -392,27 +613,11 @@ class _SendPanelState extends ConsumerState<_SendPanel> with WidgetsBindingObser
     _take(outcome);
     setState(_dropIneligibleVendor);
     if (outcome.problems.isNotEmpty) {
-      _showProblemsSheet(context, title: 'Not sent', problems: outcome.problems);
+      _reject(outcome.problems);
     }
   }
 
   void _persist() => ScanDraftStore.instance.save(_sendDraftKey, [for (final t in _items) t.code, ..._waiting]);
-
-  /// One code from the handheld field: the same lookup as the camera's Done, for one label.
-  Future<void> _addCode(String code) async {
-    if (_items.any((t) => t.code == code)) return;
-    setState(() => _busy = true);
-    final outcome = await _resolve([code]);
-    if (!mounted) return;
-    _take(outcome);
-    setState(() {
-      _dropIneligibleVendor();
-      _busy = false;
-    });
-    if (outcome.problems.isNotEmpty) {
-      _showProblemsSheet(context, title: 'Not sent', problems: outcome.problems);
-    }
-  }
 
   /// A vendor picked before the stage was known (or before it changed) might
   /// not do the stage that just got locked in — every Thaan goes through
@@ -436,38 +641,13 @@ class _SendPanelState extends ConsumerState<_SendPanel> with WidgetsBindingObser
     return alsoStages(match == null || match.isEmpty ? null : match.first.stages, _stage);
   }
 
-  Future<void> _scan() async {
-    final codes = await Navigator.of(context).push<List<String>>(
-      MaterialPageRoute(
-        builder: (_) => ContinuousScanScreen(
-          title: 'Scan to send',
-          already: {for (final t in _items) t.code},
-          draftKey: _sendDraftKey,
-          formats: const [BarcodeFormat.qrCode],
-        ),
-      ),
-    );
-    if (codes == null || codes.isEmpty || !mounted) return;
-
-    setState(() => _busy = true);
-    final outcome = await _resolve(codes);
-    if (!mounted) return;
-    _take(outcome);
-    setState(() {
-      _dropIneligibleVendor();
-      _busy = false;
-    });
-    if (outcome.problems.isNotEmpty) {
-      _showProblemsSheet(context, title: 'Not sent', problems: outcome.problems);
-    }
-  }
-
   /// Resolves each newly scanned code against `/handovers/lookup-send`, in
   /// order. The first success locks [_stage] — read synchronously off the
   /// local variable, not the not-yet-rebuilt widget state — so the rest of
   /// this same batch validates against that stage rather than each one
   /// auto-detecting independently, which is what would let two different
   /// physical batches get scanned into one send by mistake.
+  @override
   Future<_ScanOutcome<CoreThaanForSend>> _resolve(List<String> codes) async {
     final repo = ref.read(handoverRepositoryProvider);
     String? stage = _stage;
@@ -560,7 +740,10 @@ class _SendPanelState extends ConsumerState<_SendPanel> with WidgetsBindingObser
       title: 'Handovers',
       actions: const [ThemeButton()],
       padded: false,
-      body: Column(
+      body: ScannerWedge(
+        onCode: _enqueue,
+        enabled: !_busy,
+        child: Column(
         children: [
           widget.toggle,
           Padding(
@@ -627,8 +810,9 @@ class _SendPanelState extends ConsumerState<_SendPanel> with WidgetsBindingObser
             ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: _GunField(onCode: _addCode, busy: _busy),
+            child: _LiveScanner(onCode: _enqueue),
           ),
+          _intakeStatus(),
           if (_items.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -688,17 +872,13 @@ class _SendPanelState extends ConsumerState<_SendPanel> with WidgetsBindingObser
           ),
         ],
       ),
+      ),
       bottomBar: BottomActionBar(
-        secondary: AppButton.secondary(
-          label: 'Scan',
-          icon: Icons.qr_code_scanner,
-          onPressed: _busy ? null : _scan,
-        ),
         primary: AppButton.primary(
           label: 'Send${_items.isNotEmpty ? ' ${_items.length}' : ''}',
           icon: Icons.north_east,
           busy: _busy,
-          onPressed: _items.isEmpty || _stage == null || _vendorId == null ? null : _confirmSend,
+          onPressed: _items.isEmpty || _checking || _stage == null || _vendorId == null ? null : _confirmSend,
         ),
       ),
     );
@@ -784,7 +964,14 @@ class _RecordGroup {
   String get shortLabel => code ?? label;
 }
 
-class _ReceivePanelState extends ConsumerState<_ReceivePanel> with WidgetsBindingObserver {
+class _ReceivePanelState extends ConsumerState<_ReceivePanel>
+    with WidgetsBindingObserver, _ScanIntake<_ReceivePanel, CoreThaanForReceive> {
+  @override
+  bool _has(String code) => _items.any((t) => t.code == code) || _waiting.contains(code);
+
+  @override
+  bool get _holdScans => _busy;
+
   final _items = <CoreThaanForReceive>[];
   bool _busy = false;
 
@@ -829,13 +1016,14 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> with WidgetsBindin
       showOk(context, 'Restored ${outcome.resolved.length} scanned Thaan${outcome.resolved.length == 1 ? '' : 's'} from before the app closed.');
     }
     if (outcome.problems.isNotEmpty) {
-      _showProblemsSheet(context, title: 'Not restored', problems: outcome.problems);
+      _reject(outcome.problems);
     }
   }
 
   /// Folds a lookup's outcome into the batch: answered ones join the list
   /// (and the one open group, if that is how this receive is being sorted),
   /// unanswered ones wait. Then saves, and keeps the retry going or not.
+  @override
   void _take(_ScanOutcome<CoreThaanForReceive> outcome) {
     setState(() {
       _items.addAll(outcome.resolved);
@@ -868,30 +1056,18 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> with WidgetsBindin
     });
     _take(outcome);
     if (outcome.problems.isNotEmpty) {
-      _showProblemsSheet(context, title: 'Not received', problems: outcome.problems);
+      _reject(outcome.problems);
     }
   }
 
   void _persist() => ScanDraftStore.instance.save(_receiveDraftKey, [for (final t in _items) t.code, ..._waiting]);
-
-  /// One code from the handheld field: the same lookup as the camera's Done, for one label.
-  Future<void> _addCode(String code) async {
-    if (_items.any((t) => t.code == code)) return;
-    setState(() => _busy = true);
-    final outcome = await _resolve([code]);
-    if (!mounted) return;
-    _take(outcome);
-    setState(() => _busy = false);
-    if (outcome.problems.isNotEmpty) {
-      _showProblemsSheet(context, title: 'Not received', problems: outcome.problems);
-    }
-  }
 
   /// The Thaans this receive is allowed to sort — back from Print or later.
   List<CoreThaanForReceive> get _eligible => [for (final t in _items) if (t.canRecord) t];
 
   /// Resolves each newly scanned code against `/handovers/lookup-receive`,
   /// skipping any already in the batch.
+  @override
   Future<_ScanOutcome<CoreThaanForReceive>> _resolve(List<String> codes) {
     final repo = ref.read(handoverRepositoryProvider);
     final fresh = {
@@ -899,30 +1075,6 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> with WidgetsBindin
         if (!_items.any((t) => t.code == code)) code,
     }.toList();
     return _lookupAll(fresh, repo.lookupForReceive);
-  }
-
-  Future<void> _scan() async {
-    final codes = await Navigator.of(context).push<List<String>>(
-      MaterialPageRoute(
-        builder: (_) => ContinuousScanScreen(
-          title: "Scan what's coming back",
-          already: {for (final t in _items) t.code},
-          draftKey: _receiveDraftKey,
-          formats: const [BarcodeFormat.qrCode],
-        ),
-      ),
-    );
-    if (codes == null || codes.isEmpty || !mounted) return;
-
-    setState(() => _busy = true);
-    final outcome = await _resolve(codes);
-
-    if (!mounted) return;
-    _take(outcome);
-    setState(() => _busy = false);
-    if (outcome.problems.isNotEmpty) {
-      _showProblemsSheet(context, title: 'Not received', problems: outcome.problems);
-    }
   }
 
   /// Clear wipes the batch; a receive that went through leaves the labels
@@ -1136,7 +1288,10 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> with WidgetsBindin
       title: 'Handovers',
       actions: const [ThemeButton()],
       padded: false,
-      body: Column(
+      body: ScannerWedge(
+        onCode: _enqueue,
+        enabled: !_busy,
+        child: Column(
         children: [
           widget.toggle,
           const Padding(
@@ -1147,8 +1302,9 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> with WidgetsBindin
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: _GunField(onCode: _addCode, busy: _busy),
+            child: _LiveScanner(onCode: _enqueue),
           ),
+          _intakeStatus(),
           if (_items.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1195,17 +1351,13 @@ class _ReceivePanelState extends ConsumerState<_ReceivePanel> with WidgetsBindin
           ),
         ],
       ),
+      ),
       bottomBar: BottomActionBar(
-        secondary: AppButton.secondary(
-          label: 'Scan',
-          icon: Icons.qr_code_scanner,
-          onPressed: _busy ? null : _scan,
-        ),
         primary: AppButton.primary(
           label: 'Receive${_items.isNotEmpty ? ' ${_items.length}' : ''}',
           icon: Icons.south_west,
           busy: _busy,
-          onPressed: _items.isEmpty ? null : _confirmReceive,
+          onPressed: _items.isEmpty || _checking ? null : _confirmReceive,
         ),
       ),
     );

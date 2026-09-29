@@ -6,6 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/api_client.dart';
 import '../../models/core.dart';
 import '../../widgets/ui/ui.dart';
+import '../../widgets/scanner_wedge.dart';
 import '../pieces/piece_labels_pdf.dart';
 import '../pos/barcode_scan_screen.dart';
 import '../thaans/thaan_providers.dart';
@@ -126,7 +127,11 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
   Widget build(BuildContext context) {
     final p = context.p;
 
-    return AppPage(
+    return ScannerWedge(
+      onCode: (code) {
+        if (!_busy) _lookup(code);
+      },
+      child: AppPage(
       title: 'Stock Records',
       padded: false,
       // The page frame drops focus on any tap in its body, which is right
@@ -211,6 +216,7 @@ class _StockRecordsScreenState extends ConsumerState<StockRecordsScreen> {
           ],
         ),
       ),
+    ),
     );
   }
 }

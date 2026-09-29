@@ -4,6 +4,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../theme/app_theme.dart';
 import '../../widgets/theme_button.dart';
+import '../../widgets/scanner_wedge.dart';
 import '../../widgets/ui/ui.dart' show showError;
 
 /// Full-screen camera barcode/QR scanner. Pops with the first decoded string.
@@ -55,7 +56,13 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return ScannerWedge(
+      onCode: (code) {
+        if (_handled) return;
+        _handled = true;
+        Navigator.of(context).pop(code);
+      },
+      child: Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         title: Text(widget.title),
@@ -96,6 +103,7 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
           ),
         ],
       ),
+    ),
     );
   }
 }

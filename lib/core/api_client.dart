@@ -64,6 +64,7 @@ class ApiClient {
     void Function()? onUnauthorized,
     String? baseUrl,
     Future<String?> Function()? readToken,
+    this.onReachability,
   })  : _onUnauthorized = onUnauthorized,
         _readToken = readToken ?? SecureStore.instance.readToken {
     _dio = Dio(
@@ -91,6 +92,10 @@ class ApiClient {
 
   late final Dio _dio;
   final void Function()? _onUnauthorized;
+
+  /// Told after every request whether the server answered at all — the
+  /// connection light's live feed. Set for slk-core only.
+  final void Function(bool reached)? onReachability;
   final Future<String?> Function() _readToken;
 
   Future<dynamic> get(String path, {Map<String, dynamic>? query}) =>
@@ -125,7 +130,9 @@ class ApiClient {
     late final Response res;
     try {
       res = await call();
+      onReachability?.call(true);
     } on DioException catch (e) {
+      onReachability?.call(e.response != null);
       throw ApiException(
         e.type == DioExceptionType.connectionTimeout ||
                 e.type == DioExceptionType.receiveTimeout

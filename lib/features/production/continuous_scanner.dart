@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/scan_draft_store.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/scanner_wedge.dart';
 
 /// Full-screen continuous scanner: keeps the camera open and accumulates every
 /// distinct code scanned, with a beep + haptic per new one and a live counter.
@@ -132,6 +133,22 @@ class _ContinuousScanScreenState extends State<ContinuousScanScreen> with Widget
     }
   }
 
+  /// A read from the scanner gun: counted exactly like one from the camera.
+  void _acceptTyped(String code) {
+    setState(() {
+      if (_codes.add(code)) {
+        _persist();
+        HapticFeedback.lightImpact();
+        SystemSound.play(SystemSoundType.click);
+        _lastMessage = code;
+        _lastWasDup = false;
+      } else {
+        _lastMessage = code;
+        _lastWasDup = true;
+      }
+    });
+  }
+
   Future<void> _manualEntry() async {
     final c = TextEditingController();
     final code = await showDialog<String>(
@@ -168,7 +185,9 @@ class _ContinuousScanScreenState extends State<ContinuousScanScreen> with Widget
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return ScannerWedge(
+      onCode: _acceptTyped,
+      child: Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         title: Text('${widget.title} · ${_codes.length}'),
@@ -238,6 +257,7 @@ class _ContinuousScanScreenState extends State<ContinuousScanScreen> with Widget
           ),
         ],
       ),
+    ),
     );
   }
 }
